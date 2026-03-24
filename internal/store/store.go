@@ -141,7 +141,7 @@ func (s *Store) ReplaceDocuments(repoID int64, docs []Document) error {
 			hasCode = 1
 		}
 		if _, err := stmt.Exec(d.RepoID, d.Path, d.DocTitle, d.SectionTitle, d.Content, d.Tokens, d.HeadingLevel, hasCode); err != nil {
-			return fmt.Errorf("insert document %q: %w", d.SectionTitle, err)
+			return fmt.Errorf("insert document %q (path=%s): %w", d.SectionTitle, d.Path, err)
 		}
 	}
 

@@ -60,8 +60,11 @@ func ProcessMarkdownFile(filePath, content string) []Chunk {
 	}
 	chunks = split
 
-	// 7. Deduplicate
+	// 7. Deduplicate by content
 	chunks = DeduplicateChunks(chunks)
+
+	// 8. Ensure unique section titles per file
+	chunks = deduplicateSectionTitles(chunks)
 
 	return chunks
 }
@@ -383,4 +386,18 @@ func DeduplicateChunks(chunks []Chunk) []Chunk {
 	}
 
 	return result
+}
+
+// deduplicateSectionTitles ensures each chunk has a unique section title
+// by appending a counter suffix to duplicates.
+func deduplicateSectionTitles(chunks []Chunk) []Chunk {
+	seen := make(map[string]int)
+	for i := range chunks {
+		originalTitle := chunks[i].SectionTitle
+		if count := seen[originalTitle]; count > 0 {
+			chunks[i].SectionTitle = fmt.Sprintf("%s (%d)", originalTitle, count+1)
+		}
+		seen[originalTitle]++
+	}
+	return chunks
 }
