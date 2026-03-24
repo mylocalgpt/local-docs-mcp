@@ -198,6 +198,119 @@ func TestRebuildFTS(t *testing.T) {
 	}
 }
 
+func TestListRepos(t *testing.T) {
+	s := newTestStore(t)
+
+	// Empty initially
+	repos, err := s.ListRepos()
+	if err != nil {
+		t.Fatalf("ListRepos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Errorf("expected 0 repos, got %d", len(repos))
+	}
+
+	// Insert two repos
+	s.UpsertRepo("bravo", "https://example.com/b", `["docs"]`)
+	s.UpsertRepo("alpha", "https://example.com/a", `["docs"]`)
+
+	repos, err = s.ListRepos()
+	if err != nil {
+		t.Fatalf("ListRepos: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	// Should be ordered by alias
+	if repos[0].Alias != "alpha" || repos[1].Alias != "bravo" {
+		t.Errorf("wrong order: %s, %s", repos[0].Alias, repos[1].Alias)
+	}
+}
+
+func TestDeleteRepo(t *testing.T) {
+	s := newTestStore(t)
+
+	repoID, _ := s.UpsertRepo("deleteme", "https://example.com/del", `["docs"]`)
+	s.ReplaceDocuments(repoID, []Document{
+		{RepoID: repoID, Path: "a.md", DocTitle: "A", SectionTitle: "A1", Content: "content one", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "b.md", DocTitle: "B", SectionTitle: "B1", Content: "content two", Tokens: 20, HeadingLevel: 1},
+	})
+
+	count, err := s.DeleteRepo("deleteme")
+	if err != nil {
+		t.Fatalf("DeleteRepo: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 deleted docs, got %d", count)
+	}
+
+	// Repo should be gone
+	r, err := s.GetRepo("deleteme")
+	if err != nil {
+		t.Fatalf("GetRepo after delete: %v", err)
+	}
+	if r != nil {
+		t.Error("repo still exists after delete")
+	}
+
+	// Delete unknown alias should error
+	_, err = s.DeleteRepo("nonexistent")
+	if err == nil {
+		t.Error("expected error deleting nonexistent repo")
+	}
+}
+
+func TestBrowseFiles(t *testing.T) {
+	s := newTestStore(t)
+
+	repoID, _ := s.UpsertRepo("browse-repo", "https://example.com/br", `["docs"]`)
+	s.ReplaceDocuments(repoID, []Document{
+		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Intro", Content: "intro", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Setup", Content: "setup", Tokens: 20, HeadingLevel: 2},
+		{RepoID: repoID, Path: "docs/api.md", DocTitle: "API", SectionTitle: "Overview", Content: "overview", Tokens: 15, HeadingLevel: 1},
+	})
+
+	files, err := s.BrowseFiles(repoID)
+	if err != nil {
+		t.Fatalf("BrowseFiles: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+	// Ordered by path
+	if files[0].Path != "docs/api.md" || files[0].Sections != 1 {
+		t.Errorf("file 0: got %+v", files[0])
+	}
+	if files[1].Path != "docs/guide.md" || files[1].Sections != 2 {
+		t.Errorf("file 1: got %+v", files[1])
+	}
+}
+
+func TestBrowseHeadings(t *testing.T) {
+	s := newTestStore(t)
+
+	repoID, _ := s.UpsertRepo("heading-repo", "https://example.com/hr", `["docs"]`)
+	s.ReplaceDocuments(repoID, []Document{
+		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Getting Started", Content: "intro", Tokens: 100, HeadingLevel: 2},
+		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Installation", Content: "install", Tokens: 50, HeadingLevel: 3},
+		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Quick Start", Content: "quick", Tokens: 75, HeadingLevel: 3},
+	})
+
+	headings, err := s.BrowseHeadings(repoID, "guide.md")
+	if err != nil {
+		t.Fatalf("BrowseHeadings: %v", err)
+	}
+	if len(headings) != 3 {
+		t.Fatalf("expected 3 headings, got %d", len(headings))
+	}
+	if headings[0].SectionTitle != "Getting Started" || headings[0].HeadingLevel != 2 || headings[0].Tokens != 100 {
+		t.Errorf("heading 0: got %+v", headings[0])
+	}
+	if headings[1].SectionTitle != "Installation" || headings[1].HeadingLevel != 3 {
+		t.Errorf("heading 1: got %+v", headings[1])
+	}
+}
+
 func TestUpdateRepoIndex(t *testing.T) {
 	s := newTestStore(t)
 
