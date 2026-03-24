@@ -18,7 +18,7 @@ type BrowseDocsInput struct {
 func (s *Server) registerBrowseDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "browse_docs",
-		Description: "Browse the documentation tree structure. Use when search isn't specific enough and you want to explore what docs exist. Call without path to list files, with path to see headings.",
+		Description: "Browse the documentation tree structure. Two modes: omit path to list all files with section counts, or provide a path to see the heading tree with token sizes. Use when search isn't specific enough and you want to explore what docs exist.",
 	}, s.handleBrowseDocs)
 }
 
