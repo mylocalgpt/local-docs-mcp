@@ -23,3 +23,32 @@ type Document struct {
 	HeadingLevel int
 	HasCode      bool
 }
+
+// RawSearchResult holds a single row from the FTS5 search query before
+// post-processing (relevance filter, chunk merging, token budgeting).
+type RawSearchResult struct {
+	DocID        int64
+	RepoID       int64
+	RepoAlias    string
+	Path         string
+	DocTitle     string
+	SectionTitle string
+	HeadingLevel int
+	Content      string
+	Tokens       int
+	Excerpt      string
+	Score        float64
+}
+
+// FileInfo holds a file path and section count for browse output.
+type FileInfo struct {
+	Path     string
+	Sections int
+}
+
+// HeadingInfo holds heading data for browse output.
+type HeadingInfo struct {
+	SectionTitle string
+	HeadingLevel int
+	Tokens       int
+}
