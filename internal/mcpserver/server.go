@@ -15,6 +15,8 @@ import (
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
+var Version = "dev"
+
 // Server wraps the MCP protocol server and the application dependencies
 // needed to handle tool calls.
 type Server struct {
@@ -30,9 +32,11 @@ type Server struct {
 // config. The MCP server name is "local-docs-mcp" and the version comes from
 // build info, falling back to "dev".
 func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.Config) *Server {
-	version := "dev"
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		version = bi.Main.Version
+	version := Version
+	if version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			version = bi.Main.Version
+		}
 	}
 
 	mcpSrv := mcp.NewServer(

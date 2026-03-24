@@ -8,3 +8,6 @@ _docs/
 *.db
 *.db-wal
 *.db-shm
+
+# GoReleaser output
+dist/
