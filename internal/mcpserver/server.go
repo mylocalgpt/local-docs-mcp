@@ -49,6 +49,8 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 	}
 
 	srv.registerSearchDocsTool()
+	srv.registerListReposTool()
+	srv.registerBrowseDocsTool()
 
 	return srv
 }
