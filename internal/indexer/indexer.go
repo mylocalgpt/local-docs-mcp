@@ -39,7 +39,8 @@ func NewIndexer(s *store.Store) (*Indexer, error) {
 }
 
 // IndexRepo runs the full indexing pipeline for a single repository config.
-func (ix *Indexer) IndexRepo(cfg config.RepoConfig) (*IndexResult, error) {
+// When force is true, the repo is re-indexed even if the SHA hasn't changed.
+func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, error) {
 	start := time.Now()
 	result := &IndexResult{Repo: cfg.Alias}
 
@@ -68,7 +69,7 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig) (*IndexResult, error) {
 		result.Duration = time.Since(start)
 		return result, nil
 	}
-	if existing != nil && existing.CommitSHA == sha {
+	if !force && existing != nil && existing.CommitSHA == sha {
 		result.Skipped = true
 		result.Duration = time.Since(start)
 		return result, nil
@@ -166,10 +167,11 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig) (*IndexResult, error) {
 }
 
 // IndexAll indexes all repositories from the config and rebuilds FTS afterward.
-func (ix *Indexer) IndexAll(cfg *config.Config) ([]IndexResult, error) {
+// When force is true, all repos are re-indexed regardless of SHA.
+func (ix *Indexer) IndexAll(cfg *config.Config, force bool) ([]IndexResult, error) {
 	var results []IndexResult
 	for _, repo := range cfg.Repos {
-		r, err := ix.IndexRepo(repo)
+		r, err := ix.IndexRepo(repo, force)
 		if err != nil {
 			results = append(results, IndexResult{
 				Repo:  repo.Alias,

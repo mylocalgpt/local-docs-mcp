@@ -98,7 +98,7 @@ func TestIndexRepo(t *testing.T) {
 	}
 
 	// --- First index ---
-	result, err := ix.IndexRepo(repoCfg)
+	result, err := ix.IndexRepo(repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo failed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestIndexRepo(t *testing.T) {
 	}
 
 	// --- Second index (should skip) ---
-	result2, err := ix.IndexRepo(repoCfg)
+	result2, err := ix.IndexRepo(repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo (2nd) failed: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestIndexRepo(t *testing.T) {
 	mustGit("add", ".")
 	mustGit("commit", "-m", "add changelog")
 
-	result3, err := ix.IndexRepo(repoCfg)
+	result3, err := ix.IndexRepo(repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo (3rd) failed: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestIndexAll(t *testing.T) {
 		},
 	}
 
-	results, err := ix.IndexAll(cfg)
+	results, err := ix.IndexAll(cfg, false)
 	if err != nil {
 		t.Fatalf("IndexAll failed: %v", err)
 	}

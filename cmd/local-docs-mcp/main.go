@@ -6,9 +6,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mylocalgpt/local-docs-mcp/internal/config"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
+	"github.com/mylocalgpt/local-docs-mcp/internal/search"
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
@@ -17,17 +19,62 @@ func main() {
 
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp <command>\n")
-		fmt.Fprintf(os.Stderr, "Commands: index\n")
+		fmt.Fprintf(os.Stderr, "Commands: index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "index":
 		runIndex()
+	case "search":
+		runSearch()
+	case "list":
+		runList()
+	case "update":
+		runUpdate()
+	case "remove":
+		runRemove()
+	case "browse":
+		runBrowse()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Commands: index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
+}
+
+// resolveDBPath returns the database path from flags or the default location.
+func resolveDBPath(dbFlag string) (string, error) {
+	if dbFlag != "" {
+		return dbFlag, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "share", "local-docs-mcp", "docs.db"), nil
+}
+
+// openStoreOrDie opens the store at dbPath, checking that the file exists first.
+// For commands that only read (search, list, browse, remove), the DB must exist.
+func openStoreOrDie(dbPath string, mustExist bool) *store.Store {
+	if mustExist {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "No database found. Run 'local-docs-mcp index --config <path>' first.\n")
+			os.Exit(1)
+		}
+	}
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	return s
+}
+
+// isFTSError checks if an error is an FTS5 syntax error.
+func isFTSError(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "fts5")
 }
 
 func runIndex() {
@@ -44,39 +91,26 @@ func runIndex() {
 		os.Exit(1)
 	}
 
-	// Check git version early
 	if err := indexer.CheckGitVersion(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
 		os.Exit(1)
 	}
 
-	// Load config
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Determine DB path
-	db := *dbPath
-	if db == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: cannot determine home directory: %v\n", err)
-			os.Exit(1)
-		}
-		db = filepath.Join(home, ".local", "share", "local-docs-mcp", "docs.db")
-	}
-
-	// Open store
-	s, err := store.NewStore(db)
+	db, err := resolveDBPath(*dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	s := openStoreOrDie(db, false)
 	defer s.Close()
 
-	// Create indexer
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -88,7 +122,6 @@ func runIndex() {
 	var indexErr error
 
 	if *repoFilter != "" {
-		// Find the matching repo config
 		var repoCfg *config.RepoConfig
 		for _, r := range cfg.Repos {
 			if r.Alias == *repoFilter {
@@ -101,18 +134,17 @@ func runIndex() {
 			fmt.Fprintf(os.Stderr, "error: repo alias %q not found in config\n", *repoFilter)
 			os.Exit(1)
 		}
-		r, err := ix.IndexRepo(*repoCfg)
+		r, err := ix.IndexRepo(*repoCfg, false)
 		if err != nil {
 			indexErr = err
 		} else {
 			results = []indexer.IndexResult{*r}
 		}
-		// Rebuild FTS for single repo
 		if rebuildErr := s.RebuildFTS(); rebuildErr != nil {
 			log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
 		}
 	} else {
-		results, indexErr = ix.IndexAll(cfg)
+		results, indexErr = ix.IndexAll(cfg, false)
 	}
 
 	if indexErr != nil {
@@ -120,7 +152,325 @@ func runIndex() {
 		os.Exit(1)
 	}
 
-	// Print results to stderr (stdout reserved for future MCP)
+	printIndexResults(results)
+}
+
+func runSearch() {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	repoAlias := fs.String("repo", "", "filter by repo alias")
+	limit := fs.Int("limit", 20, "max raw results")
+	tokens := fs.Int("tokens", 2000, "token budget")
+	dbPath := fs.String("db", "", "override database path")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	query := strings.Join(fs.Args(), " ")
+	if query == "" {
+		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp search <query> [--repo <alias>] [--limit N] [--tokens N] [--db <path>]\n")
+		os.Exit(1)
+	}
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, true)
+	defer s.Close()
+
+	srch := search.NewSearch(s)
+	results, err := srch.Query(search.SearchOptions{
+		Query:       query,
+		RepoAlias:   *repoAlias,
+		Limit:       *limit,
+		TokenBudget: *tokens,
+	})
+	if err != nil {
+		if isFTSError(err) {
+			fmt.Fprintf(os.Stderr, "Search error: %v. Try quoting your query or simplifying it.\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	if len(results) == 0 {
+		fmt.Fprintf(os.Stderr, "No results found for '%s'\n", query)
+		return
+	}
+
+	printSearchResults(results)
+}
+
+func runList() {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	dbPath := fs.String("db", "", "override database path")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, true)
+	defer s.Close()
+
+	repos, err := s.ListRepos()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(repos) == 0 {
+		fmt.Fprintf(os.Stderr, "No repos indexed. Run 'local-docs-mcp index --config <path>' first.\n")
+		return
+	}
+
+	fmt.Printf("%-20s %5s  %-24s %s\n", "ALIAS", "DOCS", "LAST INDEXED", "SHA")
+	for _, r := range repos {
+		sha := r.CommitSHA
+		if len(sha) > 7 {
+			sha = sha[:7]
+		}
+		fmt.Printf("%-20s %5d  %-24s %s\n", r.Alias, r.DocCount, r.IndexedAt, sha)
+	}
+}
+
+func runUpdate() {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config JSON file (required)")
+	force := fs.Bool("force", false, "re-index even if SHA unchanged")
+	dbPath := fs.String("db", "", "override database path")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	if *configPath == "" {
+		fmt.Fprintf(os.Stderr, "Config file required for update. Use --config <path>\n")
+		os.Exit(1)
+	}
+
+	if err := indexer.CheckGitVersion(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
+		os.Exit(1)
+	}
+
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, false)
+	defer s.Close()
+
+	ix, err := indexer.NewIndexer(s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	defer ix.Cleanup()
+
+	var results []indexer.IndexResult
+	var indexErr error
+
+	aliasArg := ""
+	if len(fs.Args()) > 0 {
+		aliasArg = fs.Args()[0]
+	}
+
+	if aliasArg != "" {
+		var repoCfg *config.RepoConfig
+		for _, r := range cfg.Repos {
+			if r.Alias == aliasArg {
+				rc := r
+				repoCfg = &rc
+				break
+			}
+		}
+		if repoCfg == nil {
+			fmt.Fprintf(os.Stderr, "Repo alias '%s' not found in config\n", aliasArg)
+			os.Exit(1)
+		}
+		r, err := ix.IndexRepo(*repoCfg, *force)
+		if err != nil {
+			indexErr = err
+		} else {
+			results = []indexer.IndexResult{*r}
+		}
+		if rebuildErr := s.RebuildFTS(); rebuildErr != nil {
+			log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
+		}
+	} else {
+		results, indexErr = ix.IndexAll(cfg, *force)
+	}
+
+	if indexErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", indexErr)
+		os.Exit(1)
+	}
+
+	printIndexResults(results)
+}
+
+func runRemove() {
+	fs := flag.NewFlagSet("remove", flag.ExitOnError)
+	dbPath := fs.String("db", "", "override database path")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	if len(fs.Args()) == 0 {
+		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp remove <alias> [--db <path>]\n")
+		os.Exit(1)
+	}
+	alias := fs.Args()[0]
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, true)
+	defer s.Close()
+
+	count, err := s.DeleteRepo(alias)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Repo '%s' not found. Run 'local-docs-mcp list' to see indexed repos.\n", alias)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Removed %s (%d documents)\n", alias, count)
+}
+
+func runBrowse() {
+	fs := flag.NewFlagSet("browse", flag.ExitOnError)
+	dbPath := fs.String("db", "", "override database path")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	args := fs.Args()
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp browse <alias> [path] [--db <path>]\n")
+		os.Exit(1)
+	}
+	alias := args[0]
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, true)
+	defer s.Close()
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if repo == nil {
+		fmt.Fprintf(os.Stderr, "Repo '%s' not found. Run 'local-docs-mcp list' to see indexed repos.\n", alias)
+		os.Exit(1)
+	}
+
+	if len(args) < 2 {
+		// List files
+		files, err := s.BrowseFiles(repo.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		for _, f := range files {
+			fmt.Printf("%s (%d sections)\n", f.Path, f.Sections)
+		}
+	} else {
+		// List headings for a file
+		filePath := args[1]
+		headings, err := s.BrowseHeadings(repo.ID, filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(headings) == 0 {
+			fmt.Fprintf(os.Stderr, "No headings found for '%s' in '%s'\n", filePath, alias)
+			return
+		}
+
+		// Find the minimum heading level for indentation
+		minLevel := headings[0].HeadingLevel
+		for _, h := range headings[1:] {
+			if h.HeadingLevel < minLevel {
+				minLevel = h.HeadingLevel
+			}
+		}
+
+		for _, h := range headings {
+			indent := strings.Repeat("  ", h.HeadingLevel-minLevel)
+			prefix := strings.Repeat("#", h.HeadingLevel)
+			fmt.Printf("%s%s %s (%d tokens)\n", indent, prefix, h.SectionTitle, h.Tokens)
+		}
+	}
+}
+
+// printSearchResults formats search results grouped by document.
+func printSearchResults(results []search.SearchResult) {
+	// Group by (RepoAlias, Path)
+	type docKey struct {
+		RepoAlias string
+		Path      string
+	}
+	type docGroup struct {
+		key     docKey
+		results []search.SearchResult
+	}
+
+	var groups []docGroup
+	seen := make(map[docKey]int)
+
+	for _, r := range results {
+		k := docKey{r.RepoAlias, r.Path}
+		if idx, ok := seen[k]; ok {
+			groups[idx].results = append(groups[idx].results, r)
+		} else {
+			seen[k] = len(groups)
+			groups = append(groups, docGroup{key: k, results: []search.SearchResult{r}})
+		}
+	}
+
+	for i, g := range groups {
+		if i > 0 {
+			fmt.Println("---")
+			fmt.Println()
+		}
+		fmt.Printf("## %s: %s\n", g.key.RepoAlias, g.key.Path)
+		for _, r := range g.results {
+			fmt.Printf("### %s\n", r.SectionTitle)
+			fmt.Printf("Score: %.2f | Tokens: %d\n", r.Score, r.Tokens)
+			if r.Excerpt != "" {
+				fmt.Println(r.Excerpt)
+			}
+			fmt.Println()
+		}
+	}
+}
+
+// printIndexResults prints indexing results to stderr.
+func printIndexResults(results []indexer.IndexResult) {
 	hasErrors := false
 	for _, r := range results {
 		if r.Error != nil {
@@ -132,7 +482,6 @@ func runIndex() {
 			fmt.Fprintf(os.Stderr, "%s: indexed %d docs in %.1fs\n", r.Repo, r.DocsIndexed, r.Duration.Seconds())
 		}
 	}
-
 	if hasErrors {
 		os.Exit(1)
 	}
