@@ -2,7 +2,11 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"runtime/debug"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/mylocalgpt/local-docs-mcp/internal/config"
@@ -19,6 +23,7 @@ type Server struct {
 	search  *search.Search
 	indexer *indexer.Indexer
 	config  *config.Config
+	indexMu sync.Mutex
 }
 
 // New creates a Server backed by the given store, search engine, indexer, and
@@ -51,6 +56,7 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 	srv.registerSearchDocsTool()
 	srv.registerListReposTool()
 	srv.registerBrowseDocsTool()
+	srv.registerUpdateDocsTool()
 
 	return srv
 }
@@ -62,7 +68,95 @@ func (s *Server) MCPServer() *mcp.Server {
 }
 
 // Run starts the MCP server on stdio transport and blocks until the client
-// disconnects or the context is cancelled.
+// disconnects or the context is cancelled. A background goroutine refreshes
+// stale repos on startup.
 func (s *Server) Run(ctx context.Context) error {
-	return s.server.Run(ctx, &mcp.StdioTransport{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.autoRefresh(ctx)
+	}()
+
+	err := s.server.Run(ctx, &mcp.StdioTransport{})
+
+	// Wait for auto-refresh to finish so Cleanup in the caller is safe.
+	wg.Wait()
+	return err
+}
+
+// autoRefresh checks each configured repo for staleness (never indexed or
+// indexed more than 24 hours ago) and re-indexes in the background.
+func (s *Server) autoRefresh(ctx context.Context) {
+	if s.indexer == nil {
+		return
+	}
+
+	var refreshed bool
+	for _, repo := range s.config.Repos {
+		if ctx.Err() != nil {
+			return
+		}
+
+		existing, err := s.store.GetRepo(repo.Alias)
+		if err != nil {
+			log.Printf("auto-refresh: error checking %s: %v", repo.Alias, err)
+			continue
+		}
+
+		stale := false
+		var reason string
+		if existing == nil || existing.IndexedAt == "" {
+			stale = true
+			reason = "never indexed"
+		} else {
+			t, err := time.Parse(time.RFC3339, existing.IndexedAt)
+			if err != nil {
+				stale = true
+				reason = "unknown age"
+			} else if time.Since(t) > 24*time.Hour {
+				stale = true
+				reason = fmt.Sprintf("last indexed %s", existing.IndexedAt)
+			}
+		}
+
+		if !stale {
+			continue
+		}
+
+		if !s.indexMu.TryLock() {
+			log.Printf("auto-refresh: skipping %s, indexing already in progress", repo.Alias)
+			continue
+		}
+
+		log.Printf("auto-refresh: re-indexing %s (%s)", repo.Alias, reason)
+
+		repoCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		_ = repoCtx // timeout context for future use if IndexRepo accepts context
+
+		result, err := s.indexer.IndexRepo(repo, false)
+		cancel()
+		s.indexMu.Unlock()
+
+		if err != nil {
+			log.Printf("auto-refresh: %s failed: %v", repo.Alias, err)
+			continue
+		}
+		if result.Error != nil {
+			log.Printf("auto-refresh: %s error: %v", repo.Alias, result.Error)
+			continue
+		}
+		if result.Skipped {
+			log.Printf("auto-refresh: %s skipped (unchanged)", repo.Alias)
+		} else {
+			log.Printf("auto-refresh: %s indexed %d docs in %s", repo.Alias, result.DocsIndexed, result.Duration.Round(time.Millisecond))
+			refreshed = true
+		}
+	}
+
+	if refreshed {
+		if err := s.store.RebuildFTS(); err != nil {
+			log.Printf("auto-refresh: rebuild fts failed: %v", err)
+		}
+	}
 }
