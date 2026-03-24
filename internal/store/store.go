@@ -174,7 +174,7 @@ func (s *Store) SearchFTS(query string, repoID *int64, limit int) ([]RawSearchRe
 	JOIN repos r ON r.id = d.repo_id
 	WHERE docs_fts MATCH ?`
 
-	args := []interface{}{query}
+	args := []any{query}
 
 	if repoID != nil {
 		baseSQL += " AND d.repo_id = ?"

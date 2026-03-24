@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/mylocalgpt/local-docs-mcp/internal/config"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
+	"github.com/mylocalgpt/local-docs-mcp/internal/mcpserver"
 	"github.com/mylocalgpt/local-docs-mcp/internal/search"
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
@@ -19,11 +23,13 @@ func main() {
 
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp <command>\n")
-		fmt.Fprintf(os.Stderr, "Commands: index, search, list, update, remove, browse\n")
+		fmt.Fprintf(os.Stderr, "Commands: serve, index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
+	case "serve":
+		runServe()
 	case "index":
 		runIndex()
 	case "search":
@@ -38,9 +44,64 @@ func main() {
 		runBrowse()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
-		fmt.Fprintf(os.Stderr, "Commands: index, search, list, update, remove, browse\n")
+		fmt.Fprintf(os.Stderr, "Commands: serve, index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
+}
+
+func runServe() {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config JSON file (required)")
+	dbPath := fs.String("db", "", "override database path (optional, defaults to ~/.local/share/local-docs-mcp/docs.db)")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	if *configPath == "" {
+		fmt.Fprintf(os.Stderr, "error: --config is required\n")
+		os.Exit(1)
+	}
+
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := indexer.CheckGitVersion(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
+		os.Exit(1)
+	}
+
+	db, err := resolveDBPath(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	s := openStoreOrDie(db, false)
+	defer s.Close()
+
+	srch := search.NewSearch(s)
+
+	ix, err := indexer.NewIndexer(s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	defer ix.Cleanup()
+
+	srv := mcpserver.New(s, srch, ix, cfg)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	log.Println("MCP server started")
+	if err := srv.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	log.Println("MCP server stopped")
 }
 
 // resolveDBPath returns the database path from flags or the default location.
