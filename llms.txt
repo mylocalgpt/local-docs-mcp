@@ -1,0 +1,24 @@
+# local-docs-mcp
+
+> MCP server that indexes documentation from GitHub repos into a local SQLite FTS5 cache for fast search by AI assistants.
+
+## Quick Start
+- Create a config.json pointing to your repos and doc folders
+- Run: local-docs-mcp index --config config.json
+- Run: local-docs-mcp serve --config config.json
+- Add to your MCP client config (Claude Code, Cursor, Cline)
+
+## CLI Commands
+- local-docs-mcp index --config <path>
+- local-docs-mcp serve --config <path>
+- local-docs-mcp search <query>
+- local-docs-mcp list
+- local-docs-mcp update --config <path> [alias]
+- local-docs-mcp remove <alias>
+- local-docs-mcp browse <alias> [path]
+
+## MCP Tools
+- search_docs: Full-text search with BM25 ranking
+- list_repos: Show indexed repos and status
+- browse_docs: Navigate doc tree structure
+- update_docs: Re-index from git repos
