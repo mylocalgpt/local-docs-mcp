@@ -1,4 +1,10 @@
 # internal planning docs
 _docs/
 
+# binary
+/local-docs-mcp
 
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm
