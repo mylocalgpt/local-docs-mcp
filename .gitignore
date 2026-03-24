@@ -11,3 +11,7 @@ _docs/
 
 # GoReleaser output
 dist/
+
+# npm package
+npm/bin/
+npm/node_modules/
