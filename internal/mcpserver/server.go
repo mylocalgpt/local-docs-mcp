@@ -40,13 +40,17 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 		},
 	)
 
-	return &Server{
+	srv := &Server{
 		server:  mcpSrv,
 		store:   s,
 		search:  srch,
 		indexer: ix,
 		config:  cfg,
 	}
+
+	srv.registerSearchDocsTool()
+
+	return srv
 }
 
 // MCPServer returns the underlying mcp.Server. This is useful for tests that
