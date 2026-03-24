@@ -1,0 +1,13 @@
+{
+  "repos": [
+    {
+      "url": "https://github.com/MicrosoftDocs/entra-docs",
+      "paths": [
+        "docs/identity/hybrid/connect/",
+        "docs/identity/hybrid/cloud-sync/",
+        "docs/identity/hybrid/"
+      ],
+      "alias": "entra-hybrid"
+    }
+  ]
+}
