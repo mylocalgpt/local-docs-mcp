@@ -22,7 +22,7 @@ type UpdateDocsInput struct {
 func (s *Server) registerUpdateDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "update_docs",
-		Description: "Re-index documentation. Pulls latest changes for git repos and re-scans local directories. Only re-indexes git repos if the commit has changed. Only one update can run at a time.",
+		Description: "Re-index documentation. Pulls latest changes for git repos and re-scans local directories. Only re-indexes git repos if the commit has changed. Use the repo parameter to target a specific source. Only one update can run at a time.",
 	}, s.handleUpdateDocs)
 }
 

@@ -46,7 +46,21 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 			Version: version,
 		},
 		&mcp.ServerOptions{
-			Instructions: "local-docs-mcp provides search over locally indexed documentation from git repos and local directories.\n\nWorkflow:\n1. Call list_repos to see what documentation is indexed\n2. Call search_docs with your query to find relevant docs\n3. Use browse_docs to explore the doc tree when search isn't specific enough\n4. Call update_docs if documentation seems stale or outdated\n5. If docs are missing, research the GitHub repo and doc paths, then use add_docs to index them (confirm with the user first)\n6. For local project docs, use add_docs with a filesystem path\n7. Use list_repos to check indexing progress for background operations\n\nSearch supports FTS5 syntax: \"exact phrase\", term1 AND term2, prefix*",
+			Instructions: `local-docs-mcp provides search over locally indexed documentation from git repos and local directories.
+
+Workflow:
+1. Call list_repos to discover what documentation is already indexed.
+2. Call search_docs to find answers. Searches all indexed repos by default; use the repo parameter to narrow scope.
+3. Use browse_docs to explore the doc tree when you need to understand structure rather than search for a term.
+4. Call update_docs to refresh stale documentation (pulls latest for git, re-scans local dirs).
+
+Adding new documentation:
+- If the user asks about a library with no indexed docs, or search returns no results, proactively use add_docs.
+- For git repos: research the correct GitHub URL and identify the specific subdirectory paths containing documentation (e.g. ["docs/", "guides/"]) before calling add_docs.
+- For local directories: ask the user for the absolute filesystem path.
+- Indexing runs in the background. Call list_repos to check progress.
+
+Search syntax (FTS5): "exact phrase", term1 AND term2, prefix*`,
 		},
 	)
 

@@ -20,7 +20,7 @@ type SearchDocsInput struct {
 func (s *Server) registerSearchDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_docs",
-		Description: "Search indexed documentation using full-text search. Supports FTS5 syntax: \"exact phrase\", term1 AND term2, prefix*. Use the tokens parameter to control response size (default 2000). Call list_repos first to see available repos, or browse_docs to explore by file structure.",
+		Description: "Search indexed documentation using full-text search. Searches across all indexed repos by default; use the repo parameter to narrow to a specific source. Supports FTS5 syntax: \"exact phrase\", term1 AND term2, prefix*. Use the tokens parameter to control response size (default 2000). Call list_repos first to see available repos, or browse_docs to explore by file structure.",
 	}, s.handleSearchDocs)
 }
 

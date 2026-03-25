@@ -19,7 +19,7 @@ type ListReposInput struct{}
 func (s *Server) registerListReposTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_repos",
-		Description: "List all indexed documentation repos with their status and doc counts. Call this first to discover what documentation is available before using search_docs or browse_docs.",
+		Description: "List all indexed documentation repos with their status and doc counts. Also shows indexing progress for background add_docs operations. Call this first to discover what documentation is available before using search_docs or browse_docs.",
 	}, s.handleListRepos)
 }
 

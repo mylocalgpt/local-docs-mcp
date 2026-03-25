@@ -16,7 +16,7 @@ type RemoveDocsInput struct {
 func (s *Server) registerRemoveDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "remove_docs",
-		Description: "Remove an indexed documentation source and all its documents.",
+		Description: "Remove an indexed documentation source and all its documents. This is destructive and cannot be undone. Always confirm with the user before calling this tool.",
 	}, s.handleRemoveDocs)
 }
 

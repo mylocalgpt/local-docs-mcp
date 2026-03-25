@@ -26,7 +26,7 @@ type AddDocsInput struct {
 func (s *Server) registerAddDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "add_docs",
-		Description: "Add documentation from a git repo or local directory. Indexing runs in the background. Use list_repos to check progress.",
+		Description: "Add documentation from a git repo or local directory. For git repos, provide the GitHub URL and specific doc subdirectory paths (e.g. [\"docs/guide/\"]). For local directories, provide the absolute filesystem path (ask the user if unknown). Indexing runs in the background; use list_repos to check status.",
 	}, s.handleAddDocs)
 }
 
