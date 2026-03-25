@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -304,42 +305,43 @@ func runList() {
 	}
 
 	if len(repos) == 0 {
-		fmt.Fprintf(os.Stderr, "No repos indexed. Run 'local-docs-mcp index --config <path>' first.\n")
+		fmt.Fprintf(os.Stderr, "No repos indexed. Use add_docs or run 'local-docs-mcp index --config <path>' first.\n")
 		return
 	}
 
-	fmt.Printf("%-20s %5s  %-24s %s\n", "ALIAS", "DOCS", "LAST INDEXED", "SHA")
+	fmt.Printf("%-20s %-6s %-8s %5s  %-10s %-24s %s\n", "ALIAS", "TYPE", "STATUS", "DOCS", "SIZE", "LAST INDEXED", "SHA")
 	for _, r := range repos {
 		sha := r.CommitSHA
 		if len(sha) > 7 {
 			sha = sha[:7]
 		}
-		fmt.Printf("%-20s %5d  %-24s %s\n", r.Alias, r.DocCount, r.IndexedAt, sha)
+		status := r.Status
+		if status == store.StatusError && r.StatusDetail != "" {
+			status = "error"
+		}
+		contentSize, _ := s.RepoContentSize(r.ID)
+		fmt.Printf("%-20s %-6s %-8s %5d  %-10s %-24s %s\n",
+			r.Alias, r.SourceType, status, r.DocCount, formatBytesCompact(contentSize), r.IndexedAt, sha)
 	}
+}
+
+// formatBytesCompact returns a compact human-readable byte size.
+func formatBytesCompact(bytes int64) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1fMB", float64(bytes)/(1024*1024))
 }
 
 func runUpdate() {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config JSON file (required)")
+	configPath := fs.String("config", "", "path to config JSON file (optional, uses DB repos when omitted)")
 	force := fs.Bool("force", false, "re-index even if SHA unchanged")
 	dbPath := fs.String("db", "", "override database path")
 	if err := fs.Parse(os.Args[2:]); err != nil {
-		os.Exit(1)
-	}
-
-	if *configPath == "" {
-		fmt.Fprintf(os.Stderr, "Config file required for update. Use --config <path>\n")
-		os.Exit(1)
-	}
-
-	if err := indexer.CheckGitVersion(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
-		os.Exit(1)
-	}
-
-	cfg, err := config.LoadConfig(*configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -359,46 +361,121 @@ func runUpdate() {
 	}
 	defer ix.Cleanup()
 
-	var results []indexer.IndexResult
-	var indexErr error
-
 	aliasArg := ""
 	if len(fs.Args()) > 0 {
 		aliasArg = fs.Args()[0]
 	}
 
-	if aliasArg != "" {
-		var repoCfg *config.RepoConfig
-		for _, r := range cfg.Repos {
-			if r.Alias == aliasArg {
-				rc := r
-				repoCfg = &rc
-				break
-			}
-		}
-		if repoCfg == nil {
-			fmt.Fprintf(os.Stderr, "Repo alias '%s' not found in config\n", aliasArg)
+	// Config-based update (original behavior)
+	if *configPath != "" {
+		if err := indexer.CheckGitVersion(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
 			os.Exit(1)
 		}
-		r, err := ix.IndexRepo(*repoCfg, *force)
+
+		cfg, err := config.LoadConfig(*configPath)
 		if err != nil {
-			indexErr = err
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+
+		var results []indexer.IndexResult
+		var indexErr error
+
+		if aliasArg != "" {
+			var repoCfg *config.RepoConfig
+			for _, r := range cfg.Repos {
+				if r.Alias == aliasArg {
+					rc := r
+					repoCfg = &rc
+					break
+				}
+			}
+			if repoCfg == nil {
+				fmt.Fprintf(os.Stderr, "Repo alias '%s' not found in config\n", aliasArg)
+				os.Exit(1)
+			}
+			r, err := ix.IndexRepo(*repoCfg, *force)
+			if err != nil {
+				indexErr = err
+			} else {
+				results = []indexer.IndexResult{*r}
+			}
+			if rebuildErr := s.RebuildFTS(); rebuildErr != nil {
+				log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
+			}
 		} else {
-			results = []indexer.IndexResult{*r}
+			results, indexErr = ix.IndexAll(cfg, *force)
 		}
-		if rebuildErr := s.RebuildFTS(); rebuildErr != nil {
-			log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
+
+		if indexErr != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", indexErr)
+			os.Exit(1)
 		}
-	} else {
-		results, indexErr = ix.IndexAll(cfg, *force)
+		printIndexResults(results)
+		return
 	}
 
-	if indexErr != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", indexErr)
+	// DB-driven update
+	updateFromDB(s, ix, aliasArg, *force)
+}
+
+// updateFromDB re-indexes repos loaded from the database.
+func updateFromDB(s *store.Store, ix *indexer.Indexer, aliasFilter string, force bool) {
+	repos, err := s.ListRepos()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
+	if len(repos) == 0 {
+		fmt.Fprintf(os.Stderr, "No repos in database. Add docs first with 'local-docs-mcp serve' and the add_docs tool.\n")
+		os.Exit(1)
+	}
+
+	var results []indexer.IndexResult
+	for _, repo := range repos {
+		if aliasFilter != "" && repo.Alias != aliasFilter {
+			continue
+		}
+
+		r := indexRepoByType(ix, &repo, force)
+		results = append(results, *r)
+	}
+
+	if aliasFilter != "" && len(results) == 0 {
+		fmt.Fprintf(os.Stderr, "Repo alias '%s' not found in database\n", aliasFilter)
+		os.Exit(1)
+	}
+
+	if err := s.RebuildFTS(); err != nil {
+		log.Printf("warning: FTS rebuild failed: %v", err)
+	}
+
 	printIndexResults(results)
+}
+
+// indexRepoByType indexes a repo based on its source type.
+func indexRepoByType(ix *indexer.Indexer, repo *store.Repo, force bool) *indexer.IndexResult {
+	if repo.SourceType == "local" {
+		result, err := ix.IndexLocalPath(repo.Alias, repo.URL)
+		if err != nil {
+			return &indexer.IndexResult{Repo: repo.Alias, Error: err}
+		}
+		return result
+	}
+
+	var paths []string
+	if err := json.Unmarshal([]byte(repo.Paths), &paths); err != nil {
+		return &indexer.IndexResult{Repo: repo.Alias, Error: fmt.Errorf("parse paths: %w", err)}
+	}
+
+	cfg := config.RepoConfig{Alias: repo.Alias, URL: repo.URL, Paths: paths}
+	result, err := ix.IndexRepo(cfg, force)
+	if err != nil {
+		return &indexer.IndexResult{Repo: repo.Alias, Error: err}
+	}
+	return result
 }
 
 func runRemove() {
