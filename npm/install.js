@@ -91,6 +91,7 @@ async function main() {
     process.exit(1);
   }
 
+  fs.mkdirSync(binDir, { recursive: true });
   const archivePath = path.join(binDir, archiveName);
   fs.writeFileSync(archivePath, archiveBuffer);
 
