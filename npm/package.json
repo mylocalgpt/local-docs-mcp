@@ -1,7 +1,7 @@
 {
   "name": "local-docs-mcp",
   "version": "0.0.1",
-  "description": "MCP server for local documentation. Index GitHub repos, search with SQLite FTS5.",
+  "description": "Local documentation search for AI assistants, from Git repos and local directories",
   "bin": { "local-docs-mcp": "./bin/local-docs-mcp" },
   "scripts": { "postinstall": "node install.js" },
   "os": ["darwin", "linux", "win32"],
