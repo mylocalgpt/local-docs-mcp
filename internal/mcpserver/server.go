@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -62,6 +63,7 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 	srv.registerBrowseDocsTool()
 	srv.registerUpdateDocsTool()
 	srv.registerAddDocsTool()
+	srv.registerRemoveDocsTool()
 
 	return srv
 }
@@ -90,38 +92,68 @@ func (s *Server) Run(ctx context.Context) error {
 	return err
 }
 
-// autoRefresh checks each configured repo for staleness (never indexed or
-// indexed more than 24 hours ago) and re-indexes in the background.
+// autoRefresh checks repos for staleness and re-indexes in the background.
+// Reads the repo list from the database. If a config is provided, ensures
+// config repos are inserted into the DB on first run.
 func (s *Server) autoRefresh(ctx context.Context) {
 	if s.indexer == nil {
 		return
 	}
 
+	// Seed config repos into DB if they don't exist yet.
+	if s.config != nil {
+		for _, cfgRepo := range s.config.Repos {
+			existing, err := s.store.GetRepo(cfgRepo.Alias)
+			if err != nil {
+				log.Printf("auto-refresh: error checking config repo %s: %v", cfgRepo.Alias, err)
+				continue
+			}
+			if existing == nil {
+				pathsJSON, _ := json.Marshal(cfgRepo.Paths)
+				if _, err := s.store.UpsertRepo(cfgRepo.Alias, cfgRepo.URL, string(pathsJSON), "git"); err != nil {
+					log.Printf("auto-refresh: error seeding config repo %s: %v", cfgRepo.Alias, err)
+				}
+			}
+		}
+	}
+
+	repos, err := s.store.ListRepos()
+	if err != nil {
+		log.Printf("auto-refresh: error listing repos: %v", err)
+		return
+	}
+
 	var refreshed bool
-	for _, repo := range s.config.Repos {
+	for i := range repos {
 		if ctx.Err() != nil {
 			return
 		}
 
-		existing, err := s.store.GetRepo(repo.Alias)
-		if err != nil {
-			log.Printf("auto-refresh: error checking %s: %v", repo.Alias, err)
+		repo := &repos[i]
+
+		// Skip repos currently being indexed
+		if repo.Status == store.StatusIndexing {
 			continue
 		}
 
 		stale := false
 		var reason string
-		if existing == nil || existing.IndexedAt == "" {
+
+		if repo.SourceType == "local" {
+			// Local sources are always re-indexed
+			stale = true
+			reason = "local source"
+		} else if repo.IndexedAt == "" {
 			stale = true
 			reason = "never indexed"
 		} else {
-			t, err := time.Parse(time.RFC3339, existing.IndexedAt)
+			t, err := time.Parse(time.RFC3339, repo.IndexedAt)
 			if err != nil {
 				stale = true
 				reason = "unknown age"
 			} else if time.Since(t) > 24*time.Hour {
 				stale = true
-				reason = fmt.Sprintf("last indexed %s", existing.IndexedAt)
+				reason = fmt.Sprintf("last indexed %s", repo.IndexedAt)
 			}
 		}
 
@@ -136,11 +168,19 @@ func (s *Server) autoRefresh(ctx context.Context) {
 
 		log.Printf("auto-refresh: re-indexing %s (%s)", repo.Alias, reason)
 
-		repoCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		_ = repoCtx // timeout context for future use if IndexRepo accepts context
-
-		result, err := s.indexer.IndexRepo(repo, false)
-		cancel()
+		var result *indexer.IndexResult
+		if repo.SourceType == "local" {
+			result, err = s.indexer.IndexLocalPath(repo.Alias, repo.URL)
+		} else {
+			var paths []string
+			if jsonErr := json.Unmarshal([]byte(repo.Paths), &paths); jsonErr != nil {
+				log.Printf("auto-refresh: %s invalid paths JSON: %v", repo.Alias, jsonErr)
+				s.indexMu.Unlock()
+				continue
+			}
+			cfg := config.RepoConfig{Alias: repo.Alias, URL: repo.URL, Paths: paths}
+			result, err = s.indexer.IndexRepo(cfg, false)
+		}
 		s.indexMu.Unlock()
 
 		if err != nil {

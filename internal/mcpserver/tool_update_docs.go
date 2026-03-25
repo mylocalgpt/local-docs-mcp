@@ -2,24 +2,27 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/mylocalgpt/local-docs-mcp/internal/config"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
+	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
 // UpdateDocsInput defines the input schema for the update_docs tool.
 type UpdateDocsInput struct {
-	Repo string `json:"repo,omitempty" jsonschema:"Specific repo alias to update. Omit to update all configured repos."`
+	Repo string `json:"repo,omitempty" jsonschema:"Specific repo alias to update. Omit to update all repos."`
 }
 
 // registerUpdateDocsTool registers the update_docs tool on the MCP server.
 func (s *Server) registerUpdateDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "update_docs",
-		Description: "Re-index documentation from git repos. Pulls latest changes and checks for new commits, only re-indexing if the repo has changed. Call this if docs seem stale or outdated. Only one update can run at a time.",
+		Description: "Re-index documentation. Pulls latest changes for git repos and re-scans local directories. Only re-indexes git repos if the commit has changed. Only one update can run at a time.",
 	}, s.handleUpdateDocs)
 }
 
@@ -44,51 +47,66 @@ func (s *Server) handleUpdateDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	return s.updateAllRepos()
 }
 
-// updateSingleRepo re-indexes a single repo by alias.
+// updateSingleRepo re-indexes a single repo by alias, loading from DB.
 func (s *Server) updateSingleRepo(alias string) (*mcp.CallToolResult, any, error) {
-	// Find matching config
-	for _, cfg := range s.config.Repos {
-		if cfg.Alias != alias {
+	repo, err := s.store.GetRepo(alias)
+	if err != nil {
+		return nil, nil, fmt.Errorf("looking up repo: %w", err)
+	}
+	if repo == nil {
+		return nil, nil, fmt.Errorf("repo %q not found", alias)
+	}
+
+	start := time.Now()
+	result := s.indexRepoByType(repo, false)
+
+	if err := s.store.RebuildFTS(); err != nil {
+		return nil, nil, fmt.Errorf("rebuild fts: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("Update results:\n\n")
+	s.formatResult(&b, result)
+	duration := time.Since(start).Round(time.Millisecond)
+
+	if result.Error != nil {
+		fmt.Fprintf(&b, "\n1 repo checked in %s. 0 updated, 1 error.\n", duration)
+	} else if result.Skipped {
+		fmt.Fprintf(&b, "\n1 repo checked in %s. 0 updated, 1 unchanged.\n", duration)
+	} else {
+		fmt.Fprintf(&b, "\n1 repo checked in %s. 1 updated, 0 unchanged.\n", duration)
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},
+	}, nil, nil
+}
+
+// updateAllRepos re-indexes all repos from the database.
+func (s *Server) updateAllRepos() (*mcp.CallToolResult, any, error) {
+	repos, err := s.store.ListRepos()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list repos: %w", err)
+	}
+
+	var results []indexer.IndexResult
+
+	for i := range repos {
+		// Skip repos currently being indexed
+		if repos[i].Status == store.StatusIndexing {
+			results = append(results, indexer.IndexResult{
+				Repo:    repos[i].Alias,
+				Skipped: true,
+			})
 			continue
 		}
 
-		start := time.Now()
-		result, err := s.indexer.IndexRepo(cfg, false)
-		if err != nil {
-			return nil, nil, fmt.Errorf("indexing %s: %w", alias, err)
-		}
-
-		// Rebuild FTS after single-repo index for consistency
-		if err := s.store.RebuildFTS(); err != nil {
-			return nil, nil, fmt.Errorf("rebuild fts: %w", err)
-		}
-
-		var b strings.Builder
-		b.WriteString("Update results:\n\n")
-		s.formatResult(&b, result)
-		duration := time.Since(start).Round(time.Millisecond)
-
-		if result.Error != nil {
-			fmt.Fprintf(&b, "\n1 repo checked in %s. 0 updated, 1 error.\n", duration)
-		} else if result.Skipped {
-			fmt.Fprintf(&b, "\n1 repo checked in %s. 0 updated, 1 unchanged.\n", duration)
-		} else {
-			fmt.Fprintf(&b, "\n1 repo checked in %s. 1 updated, 0 unchanged.\n", duration)
-		}
-
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},
-		}, nil, nil
+		r := s.indexRepoByType(&repos[i], false)
+		results = append(results, *r)
 	}
 
-	return nil, nil, fmt.Errorf("Repo %q not found in configuration.", alias)
-}
-
-// updateAllRepos re-indexes all configured repos.
-func (s *Server) updateAllRepos() (*mcp.CallToolResult, any, error) {
-	results, err := s.indexer.IndexAll(s.config, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("index all: %w", err)
+	if err := s.store.RebuildFTS(); err != nil {
+		return nil, nil, fmt.Errorf("rebuild fts: %w", err)
 	}
 
 	var b strings.Builder
@@ -120,6 +138,34 @@ func (s *Server) updateAllRepos() (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},
 	}, nil, nil
+}
+
+// indexRepoByType indexes a repo based on its source type (git or local).
+func (s *Server) indexRepoByType(repo *store.Repo, force bool) *indexer.IndexResult {
+	if repo.SourceType == "local" {
+		result, err := s.indexer.IndexLocalPath(repo.Alias, repo.URL)
+		if err != nil {
+			return &indexer.IndexResult{Repo: repo.Alias, Error: err}
+		}
+		return result
+	}
+
+	// Git source: parse paths and construct config
+	var paths []string
+	if err := json.Unmarshal([]byte(repo.Paths), &paths); err != nil {
+		return &indexer.IndexResult{Repo: repo.Alias, Error: fmt.Errorf("parse paths: %w", err)}
+	}
+
+	cfg := config.RepoConfig{
+		Alias: repo.Alias,
+		URL:   repo.URL,
+		Paths: paths,
+	}
+	result, err := s.indexer.IndexRepo(cfg, force)
+	if err != nil {
+		return &indexer.IndexResult{Repo: repo.Alias, Error: err}
+	}
+	return result
 }
 
 // formatResult writes a single repo result line to the builder.

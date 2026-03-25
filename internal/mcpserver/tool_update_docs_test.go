@@ -137,8 +137,8 @@ func TestUpdateDocsRepoNotFound(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "not found in configuration") {
-		t.Errorf("expected 'not found in configuration' in error, got: %s", text.Text)
+	if !strings.Contains(text.Text, "not found") {
+		t.Errorf("expected 'not found' in error, got: %s", text.Text)
 	}
 }
 
