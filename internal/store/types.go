@@ -1,14 +1,25 @@
 package store
 
+// Status constants for repo indexing state.
+const (
+	StatusIndexing = "indexing"
+	StatusReady    = "ready"
+	StatusError    = "error"
+)
+
 // Repo represents a tracked documentation repository.
 type Repo struct {
-	ID        int64
-	Alias     string
-	URL       string
-	Paths     string // JSON array string
-	CommitSHA string
-	IndexedAt string
-	DocCount  int
+	ID              int64
+	Alias           string
+	URL             string
+	Paths           string // JSON array string
+	CommitSHA       string
+	IndexedAt       string
+	DocCount        int
+	SourceType      string
+	Status          string
+	StatusDetail    string
+	StatusUpdatedAt string
 }
 
 // Document represents a single chunk of documentation content.

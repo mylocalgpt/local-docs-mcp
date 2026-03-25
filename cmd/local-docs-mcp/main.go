@@ -52,7 +52,7 @@ func main() {
 func runServe() {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config JSON file (required)")
-	dbPath := fs.String("db", "", "override database path (optional, defaults to ~/.local/share/local-docs-mcp/docs.db)")
+	dbPath := fs.String("db", "", "override database path (optional, defaults to ~/.config/local-docs-mcp/docs.db)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(1)
 	}
@@ -105,6 +105,9 @@ func runServe() {
 }
 
 // resolveDBPath returns the database path from flags or the default location.
+// If the old default path (~/.local/share/local-docs-mcp/docs.db) exists and the
+// new default path (~/.config/local-docs-mcp/docs.db) does not, the old path is
+// used and a migration hint is logged to stderr.
 func resolveDBPath(dbFlag string) (string, error) {
 	if dbFlag != "" {
 		return dbFlag, nil
@@ -113,7 +116,18 @@ func resolveDBPath(dbFlag string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
-	return filepath.Join(home, ".local", "share", "local-docs-mcp", "docs.db"), nil
+
+	newPath := filepath.Join(home, ".config", "local-docs-mcp", "docs.db")
+	oldPath := filepath.Join(home, ".local", "share", "local-docs-mcp", "docs.db")
+
+	if _, err := os.Stat(oldPath); err == nil {
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			log.Printf("Using existing database at %s. Consider moving it to %s.", oldPath, newPath)
+			return oldPath, nil
+		}
+	}
+
+	return newPath, nil
 }
 
 // openStoreOrDie opens the store at dbPath, checking that the file exists first.

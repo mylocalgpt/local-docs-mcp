@@ -44,6 +44,18 @@ func TestUpsertAndGetRepo(t *testing.T) {
 	if r.Paths != `["docs"]` {
 		t.Errorf("Paths mismatch: got %q", r.Paths)
 	}
+	if r.SourceType != "git" {
+		t.Errorf("SourceType mismatch: got %q, want %q", r.SourceType, "git")
+	}
+	if r.Status != "ready" {
+		t.Errorf("Status mismatch: got %q, want %q", r.Status, "ready")
+	}
+	if r.StatusDetail != "" {
+		t.Errorf("StatusDetail should be empty, got %q", r.StatusDetail)
+	}
+	if r.StatusUpdatedAt != "" {
+		t.Errorf("StatusUpdatedAt should be empty, got %q", r.StatusUpdatedAt)
+	}
 }
 
 func TestGetRepoNotFound(t *testing.T) {
@@ -308,6 +320,109 @@ func TestBrowseHeadings(t *testing.T) {
 	}
 	if headings[1].SectionTitle != "Installation" || headings[1].HeadingLevel != 3 {
 		t.Errorf("heading 1: got %+v", headings[1])
+	}
+}
+
+func TestUpdateRepoStatus(t *testing.T) {
+	s := newTestStore(t)
+
+	id, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`)
+	if err != nil {
+		t.Fatalf("UpsertRepo: %v", err)
+	}
+
+	if err := s.UpdateRepoStatus(id, StatusIndexing, "cloning..."); err != nil {
+		t.Fatalf("UpdateRepoStatus: %v", err)
+	}
+
+	r, err := s.GetRepo("testrepo")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if r.Status != StatusIndexing {
+		t.Errorf("Status mismatch: got %q, want %q", r.Status, StatusIndexing)
+	}
+	if r.StatusDetail != "cloning..." {
+		t.Errorf("StatusDetail mismatch: got %q", r.StatusDetail)
+	}
+	if r.StatusUpdatedAt == "" {
+		t.Error("StatusUpdatedAt should be set after UpdateRepoStatus")
+	}
+
+	// Update to error
+	if err := s.UpdateRepoStatus(id, StatusError, "git clone failed"); err != nil {
+		t.Fatalf("UpdateRepoStatus error: %v", err)
+	}
+
+	r, err = s.GetRepo("testrepo")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if r.Status != StatusError {
+		t.Errorf("Status mismatch: got %q, want %q", r.Status, StatusError)
+	}
+	if r.StatusDetail != "git clone failed" {
+		t.Errorf("StatusDetail mismatch: got %q", r.StatusDetail)
+	}
+}
+
+func TestDBPath(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	if s.DBPath() != ":memory:" {
+		t.Errorf("DBPath mismatch: got %q, want %q", s.DBPath(), ":memory:")
+	}
+}
+
+func TestMigrationIdempotent(t *testing.T) {
+	// Open a store twice to verify migration ALTER TABLE statements
+	// are idempotent (duplicate column errors are ignored).
+	s1, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore first: %v", err)
+	}
+	s1.Close()
+
+	// Since :memory: is ephemeral, use a temp file to test real reopening.
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	s2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore create: %v", err)
+	}
+	s2.Close()
+
+	// Reopen - migration should run again without error.
+	s3, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore reopen: %v", err)
+	}
+	defer s3.Close()
+
+	// Verify columns work after reopening.
+	id, err := s3.UpsertRepo("test", "https://example.com", `["docs"]`)
+	if err != nil {
+		t.Fatalf("UpsertRepo: %v", err)
+	}
+
+	r, err := s3.GetRepo("test")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if r.SourceType != "git" {
+		t.Errorf("SourceType mismatch: got %q", r.SourceType)
+	}
+	if r.Status != "ready" {
+		t.Errorf("Status mismatch: got %q", r.Status)
+	}
+
+	if err := s3.UpdateRepoStatus(id, StatusIndexing, "test"); err != nil {
+		t.Fatalf("UpdateRepoStatus: %v", err)
 	}
 }
 

@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 // Store provides access to the SQLite documentation database.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbPath string
 }
 
 // NewStore opens (or creates) the SQLite database at dbPath, applies pragmas
@@ -49,7 +52,30 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	// Migrate existing databases: add new columns if they don't exist.
+	// SQLite has no ALTER TABLE ... IF NOT EXISTS, so we ignore
+	// "duplicate column name" errors.
+	migrations := []string{
+		"ALTER TABLE repos ADD COLUMN source_type TEXT NOT NULL DEFAULT 'git'",
+		"ALTER TABLE repos ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'",
+		"ALTER TABLE repos ADD COLUMN status_detail TEXT",
+		"ALTER TABLE repos ADD COLUMN status_updated_at TEXT",
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				db.Close()
+				return nil, fmt.Errorf("migration %q: %w", m, err)
+			}
+		}
+	}
+
+	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// DBPath returns the path to the underlying database file.
+func (s *Store) DBPath() string {
+	return s.dbPath
 }
 
 // UpsertRepo inserts or updates a repo by alias. Returns the repo ID.
@@ -87,9 +113,11 @@ func (s *Store) GetRepo(alias string) (*Repo, error) {
 	r := &Repo{}
 	err := s.db.QueryRow(
 		`SELECT id, alias, url, paths,
-		        COALESCE(commit_sha, ''), COALESCE(indexed_at, ''), doc_count
+		        COALESCE(commit_sha, ''), COALESCE(indexed_at, ''), doc_count,
+		        source_type, status, COALESCE(status_detail, ''), COALESCE(status_updated_at, '')
 		 FROM repos WHERE alias = ?`, alias,
-	).Scan(&r.ID, &r.Alias, &r.URL, &r.Paths, &r.CommitSHA, &r.IndexedAt, &r.DocCount)
+	).Scan(&r.ID, &r.Alias, &r.URL, &r.Paths, &r.CommitSHA, &r.IndexedAt, &r.DocCount,
+		&r.SourceType, &r.Status, &r.StatusDetail, &r.StatusUpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -109,6 +137,19 @@ func (s *Store) UpdateRepoIndex(id int64, commitSHA, indexedAt string, docCount 
 	)
 	if err != nil {
 		return fmt.Errorf("update repo index: %w", err)
+	}
+	return nil
+}
+
+// UpdateRepoStatus sets the status, detail, and status_updated_at for a repo.
+func (s *Store) UpdateRepoStatus(id int64, status, detail string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		"UPDATE repos SET status = ?, status_detail = ?, status_updated_at = ? WHERE id = ?",
+		status, detail, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update repo status: %w", err)
 	}
 	return nil
 }
@@ -209,7 +250,8 @@ func (s *Store) SearchFTS(query string, repoID *int64, limit int) ([]RawSearchRe
 // ListRepos returns all repos ordered by alias.
 func (s *Store) ListRepos() ([]Repo, error) {
 	rows, err := s.db.Query(
-		`SELECT id, alias, url, paths, COALESCE(commit_sha, ''), COALESCE(indexed_at, ''), doc_count
+		`SELECT id, alias, url, paths, COALESCE(commit_sha, ''), COALESCE(indexed_at, ''), doc_count,
+		        source_type, status, COALESCE(status_detail, ''), COALESCE(status_updated_at, '')
 		 FROM repos ORDER BY alias`)
 	if err != nil {
 		return nil, fmt.Errorf("list repos: %w", err)
@@ -219,7 +261,8 @@ func (s *Store) ListRepos() ([]Repo, error) {
 	var repos []Repo
 	for rows.Next() {
 		var r Repo
-		if err := rows.Scan(&r.ID, &r.Alias, &r.URL, &r.Paths, &r.CommitSHA, &r.IndexedAt, &r.DocCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.Alias, &r.URL, &r.Paths, &r.CommitSHA, &r.IndexedAt, &r.DocCount,
+			&r.SourceType, &r.Status, &r.StatusDetail, &r.StatusUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan repo: %w", err)
 		}
 		repos = append(repos, r)

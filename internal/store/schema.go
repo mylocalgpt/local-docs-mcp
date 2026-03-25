@@ -8,7 +8,11 @@ CREATE TABLE IF NOT EXISTS repos (
     paths TEXT NOT NULL,
     commit_sha TEXT,
     indexed_at TEXT,
-    doc_count INTEGER DEFAULT 0
+    doc_count INTEGER DEFAULT 0,
+    source_type TEXT NOT NULL DEFAULT 'git',
+    status TEXT NOT NULL DEFAULT 'ready',
+    status_detail TEXT,
+    status_updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS documents (
