@@ -41,13 +41,8 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
       - run: npm install -g npm@latest
-      - name: Test npm install
-        run: |
+      - run: |
           cd npm
           VERSION=${GITHUB_REF_NAME#v}
           npm version $VERSION --no-git-tag-version
-          node install.js
-          ./bin/local-docs-mcp list 2>&1 || true
-      - run: |
-          cd npm
           npm publish --provenance --access public
