@@ -19,7 +19,7 @@ func setupTestStore(t *testing.T) *store.Store {
 // insertTestRepo inserts a repo and returns its ID.
 func insertTestRepo(t *testing.T, s *store.Store, alias, url string) int64 {
 	t.Helper()
-	id, err := s.UpsertRepo(alias, url, `["docs"]`)
+	id, err := s.UpsertRepo(alias, url, `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo %s: %v", alias, err)
 	}

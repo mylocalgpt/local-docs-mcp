@@ -235,3 +235,166 @@ func TestIndexRepoConfigPaths(t *testing.T) {
 		t.Fatalf("expected %s, got %s", expected, string(data))
 	}
 }
+
+// createLocalDocsDir creates a temp directory with nested markdown files
+// for testing IndexLocalPath.
+func createLocalDocsDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	// Top-level markdown
+	if err := os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# My Project\n\nOverview of the project.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nested directory
+	sub := filepath.Join(dir, "guides")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "quickstart.md"), []byte("# Quick Start\n\n## Step 1\n\nInstall the tool.\n\n## Step 2\n\nRun the command.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-markdown file (should be ignored)
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not markdown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
+}
+
+func TestIndexLocalPath(t *testing.T) {
+	dir := createLocalDocsDir(t)
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ix, err := NewIndexer(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Cleanup()
+
+	result, err := ix.IndexLocalPath("local-docs", dir)
+	if err != nil {
+		t.Fatalf("IndexLocalPath failed: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("IndexLocalPath result error: %v", result.Error)
+	}
+	if result.DocsIndexed == 0 {
+		t.Fatal("expected documents to be indexed")
+	}
+
+	// Verify repo record
+	repo, err := s.GetRepo("local-docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo == nil {
+		t.Fatal("expected repo record to exist")
+	}
+	if repo.SourceType != "local" {
+		t.Errorf("SourceType: got %q, want %q", repo.SourceType, "local")
+	}
+	if repo.CommitSHA != "" {
+		t.Errorf("CommitSHA should be empty for local, got %q", repo.CommitSHA)
+	}
+	if repo.DocCount == 0 {
+		t.Fatal("expected doc count > 0")
+	}
+	if repo.URL != dir {
+		t.Errorf("URL should be dir path: got %q, want %q", repo.URL, dir)
+	}
+}
+
+func TestIndexLocalPathReindexReplaces(t *testing.T) {
+	dir := createLocalDocsDir(t)
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ix, err := NewIndexer(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Cleanup()
+
+	// First index
+	r1, err := ix.IndexLocalPath("local-docs", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r1.Error != nil {
+		t.Fatal(r1.Error)
+	}
+	firstCount := r1.DocsIndexed
+
+	// Re-index same alias should replace, not duplicate
+	r2, err := ix.IndexLocalPath("local-docs", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Error != nil {
+		t.Fatal(r2.Error)
+	}
+	if r2.DocsIndexed != firstCount {
+		t.Errorf("doc count changed on reindex: %d vs %d", firstCount, r2.DocsIndexed)
+	}
+
+	// Verify no duplicate documents in DB
+	repo, _ := s.GetRepo("local-docs")
+	if repo.DocCount != firstCount {
+		t.Errorf("DB doc count mismatch: got %d, want %d", repo.DocCount, firstCount)
+	}
+}
+
+func TestIndexLocalPathNonExistentDir(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ix, err := NewIndexer(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Cleanup()
+
+	_, err = ix.IndexLocalPath("bad", "/nonexistent/path/that/does/not/exist")
+	if err == nil {
+		t.Fatal("expected error for nonexistent directory")
+	}
+}
+
+func TestIndexLocalPathFileNotDir(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "file.md")
+	if err := os.WriteFile(tmpFile, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ix, err := NewIndexer(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Cleanup()
+
+	_, err = ix.IndexLocalPath("bad", tmpFile)
+	if err == nil {
+		t.Fatal("expected error for file (not directory)")
+	}
+}

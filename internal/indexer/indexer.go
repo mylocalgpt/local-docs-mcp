@@ -82,7 +82,7 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 		result.Duration = time.Since(start)
 		return result, nil
 	}
-	repoID, err := ix.store.UpsertRepo(cfg.Alias, cfg.URL, string(pathsJSON))
+	repoID, err := ix.store.UpsertRepo(cfg.Alias, cfg.URL, string(pathsJSON), "git")
 	if err != nil {
 		result.Error = fmt.Errorf("upsert repo %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
@@ -97,9 +97,48 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 	}
 
 	// 6. Walk paths and collect markdown files
+	docs, err := ix.walkAndChunk(repoDir, cfg.Paths, repoID)
+	if err != nil {
+		result.Error = fmt.Errorf("walk %s: %w", cfg.Alias, err)
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
+	// 7. Replace documents atomically
+	if err := ix.store.ReplaceDocuments(repoID, docs); err != nil {
+		result.Error = fmt.Errorf("replace documents %s: %w", cfg.Alias, err)
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
+	// 8. Update repo index metadata
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	if err := ix.store.UpdateRepoIndex(repoID, sha, timestamp, len(docs)); err != nil {
+		result.Error = fmt.Errorf("update repo index %s: %w", cfg.Alias, err)
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
+	result.DocsIndexed = len(docs)
+	result.Duration = time.Since(start)
+	return result, nil
+}
+
+// walkAndChunk walks the given rootDir (optionally filtered by paths) and
+// returns chunked markdown documents. When paths is nil or empty, the entire
+// rootDir is walked.
+func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([]store.Document, error) {
 	var docs []store.Document
-	for _, p := range cfg.Paths {
-		walkRoot := filepath.Join(repoDir, p)
+
+	walkRoots := []string{rootDir}
+	if len(paths) > 0 {
+		walkRoots = make([]string, len(paths))
+		for i, p := range paths {
+			walkRoots[i] = filepath.Join(rootDir, p)
+		}
+	}
+
+	for _, walkRoot := range walkRoots {
 		err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				log.Printf("warning: walk error at %s: %v", path, err)
@@ -113,8 +152,7 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 				return nil
 			}
 
-			// Compute path relative to repo root
-			relPath, err := filepath.Rel(repoDir, path)
+			relPath, err := filepath.Rel(rootDir, path)
 			if err != nil {
 				log.Printf("warning: cannot compute relative path for %s: %v", path, err)
 				return nil
@@ -142,21 +180,49 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 			return nil
 		})
 		if err != nil {
-			log.Printf("warning: walk failed for path %s in %s: %v", p, cfg.Alias, err)
+			log.Printf("warning: walk failed for %s: %v", walkRoot, err)
 		}
 	}
 
-	// 7. Replace documents atomically
-	if err := ix.store.ReplaceDocuments(repoID, docs); err != nil {
-		result.Error = fmt.Errorf("replace documents %s: %w", cfg.Alias, err)
+	return docs, nil
+}
+
+// IndexLocalPath indexes markdown files from a local directory.
+func (ix *Indexer) IndexLocalPath(alias, dirPath string) (*IndexResult, error) {
+	start := time.Now()
+	result := &IndexResult{Repo: alias}
+
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", dirPath, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", dirPath)
+	}
+
+	repoID, err := ix.store.UpsertRepo(alias, dirPath, "[]", "local")
+	if err != nil {
+		result.Error = fmt.Errorf("upsert repo %s: %w", alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
-	// 8. Update repo index metadata
+	docs, err := ix.walkAndChunk(dirPath, nil, repoID)
+	if err != nil {
+		result.Error = fmt.Errorf("walk %s: %w", alias, err)
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
+	if err := ix.store.ReplaceDocuments(repoID, docs); err != nil {
+		result.Error = fmt.Errorf("replace documents %s: %w", alias, err)
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
 	timestamp := time.Now().UTC().Format(time.RFC3339)
-	if err := ix.store.UpdateRepoIndex(repoID, sha, timestamp, len(docs)); err != nil {
-		result.Error = fmt.Errorf("update repo index %s: %w", cfg.Alias, err)
+	if err := ix.store.UpdateRepoIndex(repoID, "", timestamp, len(docs)); err != nil {
+		result.Error = fmt.Errorf("update repo index %s: %w", alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}

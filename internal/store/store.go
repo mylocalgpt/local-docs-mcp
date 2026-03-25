@@ -80,30 +80,27 @@ func (s *Store) DBPath() string {
 
 // UpsertRepo inserts or updates a repo by alias. Returns the repo ID.
 // Does not modify commit_sha, indexed_at, or doc_count.
-func (s *Store) UpsertRepo(alias, url, paths string) (int64, error) {
+func (s *Store) UpsertRepo(alias, url, paths, sourceType string) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO repos (alias, url, paths)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(alias) DO UPDATE SET url=excluded.url, paths=excluded.paths`,
-		alias, url, paths,
+		`INSERT INTO repos (alias, url, paths, source_type)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(alias) DO UPDATE SET url=excluded.url, paths=excluded.paths, source_type=excluded.source_type`,
+		alias, url, paths, sourceType,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("upsert repo: %w", err)
 	}
 
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("last insert id: %w", err)
+	// ON CONFLICT DO UPDATE may return a stale or incorrect LastInsertId
+	// (e.g. a new auto-increment value even though the row was updated).
+	// Always resolve via SELECT for correctness.
+	var id int64
+	row := s.db.QueryRow("SELECT id FROM repos WHERE alias = ?", alias)
+	if err := row.Scan(&id); err != nil {
+		return 0, fmt.Errorf("select repo id: %w", err)
 	}
 
-	// ON CONFLICT DO UPDATE does not always return a useful LastInsertId.
-	// Fall back to a SELECT if needed.
-	if id == 0 {
-		row := s.db.QueryRow("SELECT id FROM repos WHERE alias = ?", alias)
-		if err := row.Scan(&id); err != nil {
-			return 0, fmt.Errorf("select repo id: %w", err)
-		}
-	}
+	_ = res // result only used for error check above
 
 	return id, nil
 }

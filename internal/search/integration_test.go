@@ -14,7 +14,7 @@ func setupIntegrationStore(t *testing.T) (*store.Store, int64, int64) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	repoA, err := s.UpsertRepo("repo-a", "https://example.com/a", `["docs"]`)
+	repoA, err := s.UpsertRepo("repo-a", "https://example.com/a", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo-a: %v", err)
 	}
@@ -22,7 +22,7 @@ func setupIntegrationStore(t *testing.T) (*store.Store, int64, int64) {
 		t.Fatalf("update repo-a index: %v", err)
 	}
 
-	repoB, err := s.UpsertRepo("repo-b", "https://example.com/b", `["docs"]`)
+	repoB, err := s.UpsertRepo("repo-b", "https://example.com/b", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo-b: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestIntegrationRelevanceFilter(t *testing.T) {
 	}
 	defer s.Close()
 
-	repoID, _ := s.UpsertRepo("test", "https://example.com/test", `["docs"]`)
+	repoID, _ := s.UpsertRepo("test", "https://example.com/test", `["docs"]`, "git")
 
 	// Insert docs with varying relevance to "kubernetes"
 	docs := []store.Document{

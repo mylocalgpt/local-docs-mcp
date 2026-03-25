@@ -25,7 +25,7 @@ func setupIntegrationTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession,
 	}
 
 	// Insert a test repo with known data
-	repoID, err := s.UpsertRepo("mylib", "https://github.com/example/mylib", `["docs"]`)
+	repoID, err := s.UpsertRepo("mylib", "https://github.com/example/mylib", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}

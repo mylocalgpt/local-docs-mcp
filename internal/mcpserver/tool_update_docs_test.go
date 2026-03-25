@@ -202,7 +202,7 @@ func TestFormatResult(t *testing.T) {
 	defer s.Close()
 
 	// Insert a repo so GetRepo works for commit SHA lookup
-	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`)
+	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestAutoRefreshStaleDetection(t *testing.T) {
 	defer s.Close()
 
 	// Insert a stale repo (indexed 2 days ago)
-	repoID, err := s.UpsertRepo("stale-repo", "https://example.com/stale.git", `["docs"]`)
+	repoID, err := s.UpsertRepo("stale-repo", "https://example.com/stale.git", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestAutoRefreshStaleDetection(t *testing.T) {
 	}
 
 	// Insert a fresh repo (indexed 1 hour ago)
-	repoID2, err := s.UpsertRepo("fresh-repo", "https://example.com/fresh.git", `["docs"]`)
+	repoID2, err := s.UpsertRepo("fresh-repo", "https://example.com/fresh.git", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}

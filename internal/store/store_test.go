@@ -17,7 +17,7 @@ func newTestStore(t *testing.T) *Store {
 func TestUpsertAndGetRepo(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.UpsertRepo("myrepo", "https://github.com/example/repo", `["docs"]`)
+	id, err := s.UpsertRepo("myrepo", "https://github.com/example/repo", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -73,12 +73,12 @@ func TestGetRepoNotFound(t *testing.T) {
 func TestUpsertRepoPreservesID(t *testing.T) {
 	s := newTestStore(t)
 
-	id1, err := s.UpsertRepo("myrepo", "https://example.com/old", `["docs"]`)
+	id1, err := s.UpsertRepo("myrepo", "https://example.com/old", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
 
-	id2, err := s.UpsertRepo("myrepo", "https://example.com/new", `["docs","api"]`)
+	id2, err := s.UpsertRepo("myrepo", "https://example.com/new", `["docs","api"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestUpsertRepoPreservesID(t *testing.T) {
 func TestReplaceDocumentsAndFTS(t *testing.T) {
 	s := newTestStore(t)
 
-	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`)
+	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestReplaceDocumentsAndFTS(t *testing.T) {
 func TestReplaceDocumentsEmptyClearsFTS(t *testing.T) {
 	s := newTestStore(t)
 
-	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`)
+	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -223,8 +223,8 @@ func TestListRepos(t *testing.T) {
 	}
 
 	// Insert two repos
-	s.UpsertRepo("bravo", "https://example.com/b", `["docs"]`)
-	s.UpsertRepo("alpha", "https://example.com/a", `["docs"]`)
+	s.UpsertRepo("bravo", "https://example.com/b", `["docs"]`, "git")
+	s.UpsertRepo("alpha", "https://example.com/a", `["docs"]`, "git")
 
 	repos, err = s.ListRepos()
 	if err != nil {
@@ -242,7 +242,7 @@ func TestListRepos(t *testing.T) {
 func TestDeleteRepo(t *testing.T) {
 	s := newTestStore(t)
 
-	repoID, _ := s.UpsertRepo("deleteme", "https://example.com/del", `["docs"]`)
+	repoID, _ := s.UpsertRepo("deleteme", "https://example.com/del", `["docs"]`, "git")
 	s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "a.md", DocTitle: "A", SectionTitle: "A1", Content: "content one", Tokens: 10, HeadingLevel: 1},
 		{RepoID: repoID, Path: "b.md", DocTitle: "B", SectionTitle: "B1", Content: "content two", Tokens: 20, HeadingLevel: 1},
@@ -275,7 +275,7 @@ func TestDeleteRepo(t *testing.T) {
 func TestBrowseFiles(t *testing.T) {
 	s := newTestStore(t)
 
-	repoID, _ := s.UpsertRepo("browse-repo", "https://example.com/br", `["docs"]`)
+	repoID, _ := s.UpsertRepo("browse-repo", "https://example.com/br", `["docs"]`, "git")
 	s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Intro", Content: "intro", Tokens: 10, HeadingLevel: 1},
 		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Setup", Content: "setup", Tokens: 20, HeadingLevel: 2},
@@ -301,7 +301,7 @@ func TestBrowseFiles(t *testing.T) {
 func TestBrowseHeadings(t *testing.T) {
 	s := newTestStore(t)
 
-	repoID, _ := s.UpsertRepo("heading-repo", "https://example.com/hr", `["docs"]`)
+	repoID, _ := s.UpsertRepo("heading-repo", "https://example.com/hr", `["docs"]`, "git")
 	s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Getting Started", Content: "intro", Tokens: 100, HeadingLevel: 2},
 		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Installation", Content: "install", Tokens: 50, HeadingLevel: 3},
@@ -326,7 +326,7 @@ func TestBrowseHeadings(t *testing.T) {
 func TestUpdateRepoStatus(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`)
+	id, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestMigrationIdempotent(t *testing.T) {
 	defer s3.Close()
 
 	// Verify columns work after reopening.
-	id, err := s3.UpsertRepo("test", "https://example.com", `["docs"]`)
+	id, err := s3.UpsertRepo("test", "https://example.com", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestMigrationIdempotent(t *testing.T) {
 func TestUpdateRepoIndex(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`)
+	id, err := s.UpsertRepo("testrepo", "https://example.com/repo", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("UpsertRepo: %v", err)
 	}

@@ -21,7 +21,7 @@ func setupBrowseTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession, func
 		t.Fatalf("create store: %v", err)
 	}
 
-	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`)
+	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}

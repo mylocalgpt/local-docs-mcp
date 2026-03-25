@@ -23,7 +23,7 @@ func setupListReposTest(t *testing.T, populate bool) (*mcp.ClientSession, *mcp.S
 	}
 
 	if populate {
-		repoID, err := s.UpsertRepo("react-docs", "https://github.com/reactjs/react.dev", `["docs"]`)
+		repoID, err := s.UpsertRepo("react-docs", "https://github.com/reactjs/react.dev", `["docs"]`, "git")
 		if err != nil {
 			t.Fatalf("upsert repo: %v", err)
 		}
@@ -34,7 +34,7 @@ func setupListReposTest(t *testing.T, populate bool) (*mcp.ClientSession, *mcp.S
 			t.Fatalf("update repo index: %v", err)
 		}
 
-		repoID2, err := s.UpsertRepo("golang-docs", "https://github.com/golang/go", `["doc"]`)
+		repoID2, err := s.UpsertRepo("golang-docs", "https://github.com/golang/go", `["doc"]`, "git")
 		if err != nil {
 			t.Fatalf("upsert repo: %v", err)
 		}

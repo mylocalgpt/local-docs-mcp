@@ -22,7 +22,7 @@ func setupSearchTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession, func
 	}
 
 	// Insert a test repo and documents
-	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo.git", `["docs"]`)
+	repoID, err := s.UpsertRepo("testrepo", "https://example.com/repo.git", `["docs"]`, "git")
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}
