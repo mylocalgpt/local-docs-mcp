@@ -36,14 +36,13 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@latest
       - run: |
           cd npm
           VERSION=${GITHUB_REF_NAME#v}
           npm version $VERSION --no-git-tag-version
-          npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --provenance --access public
