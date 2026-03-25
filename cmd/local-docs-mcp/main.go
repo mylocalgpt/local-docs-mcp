@@ -51,26 +51,28 @@ func main() {
 
 func runServe() {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to config JSON file (required)")
+	configPath := fs.String("config", "", "path to config JSON file (optional, enables pre-configured repos)")
 	dbPath := fs.String("db", "", "override database path (optional, defaults to ~/.config/local-docs-mcp/docs.db)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(1)
 	}
 
-	if *configPath == "" {
-		fmt.Fprintf(os.Stderr, "error: --config is required\n")
-		os.Exit(1)
-	}
+	var cfg *config.Config
+	if *configPath != "" {
+		var err error
+		cfg, err = config.LoadConfig(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 
-	cfg, err := config.LoadConfig(*configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := indexer.CheckGitVersion(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
-		os.Exit(1)
+		// Check git version when a config is provided (config repos are always git)
+		if err := indexer.CheckGitVersion(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v. Ensure git 2.25.0+ is installed and in PATH.\n", err)
+			os.Exit(1)
+		}
+	} else {
+		cfg = &config.Config{}
 	}
 
 	db, err := resolveDBPath(*dbPath)

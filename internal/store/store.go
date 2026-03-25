@@ -345,6 +345,20 @@ func (s *Store) BrowseHeadings(repoID int64, path string) ([]HeadingInfo, error)
 	return headings, rows.Err()
 }
 
+// RepoContentSize returns the total size in bytes of all document content
+// for a given repo.
+func (s *Store) RepoContentSize(repoID int64) (int64, error) {
+	var size int64
+	err := s.db.QueryRow(
+		"SELECT COALESCE(SUM(LENGTH(content)), 0) FROM documents WHERE repo_id = ?",
+		repoID,
+	).Scan(&size)
+	if err != nil {
+		return 0, fmt.Errorf("repo content size: %w", err)
+	}
+	return size, nil
+}
+
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()

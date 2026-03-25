@@ -143,6 +143,16 @@ func TestListReposPopulated(t *testing.T) {
 		t.Error("expected react-docs URL in output")
 	}
 
+	// Check source type
+	if !strings.Contains(text.Text, "[git]") {
+		t.Error("expected '[git]' source type in output")
+	}
+
+	// Check status line
+	if !strings.Contains(text.Text, "Status:") {
+		t.Error("expected 'Status:' in output")
+	}
+
 	// Check summary line
 	if !strings.Contains(text.Text, "2 repos indexed") {
 		t.Error("expected summary '2 repos indexed'")
@@ -174,8 +184,28 @@ func TestListReposEmpty(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "No documentation repos indexed yet") {
+	if !strings.Contains(text.Text, "No documentation indexed yet") {
 		t.Errorf("expected empty message, got: %s", text.Text)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes int64
+		want  string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1048576, "1.0 MB"},
+		{2621440, "2.5 MB"},
+	}
+	for _, tt := range tests {
+		got := formatBytes(tt.bytes)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
+		}
 	}
 }
 

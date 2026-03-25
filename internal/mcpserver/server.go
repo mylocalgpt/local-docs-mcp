@@ -46,7 +46,7 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 			Version: version,
 		},
 		&mcp.ServerOptions{
-			Instructions: "local-docs-mcp provides search over locally cached documentation from git repos.\n\nWorkflow:\n1. Call list_repos to see what documentation is indexed\n2. Call search_docs with your query to find relevant docs\n3. Use browse_docs to explore the doc tree when search isn't specific enough\n4. Call update_docs if documentation seems stale or outdated\n\nSearch supports FTS5 syntax: \"exact phrase\", term1 AND term2, prefix*",
+			Instructions: "local-docs-mcp provides search over locally indexed documentation from git repos and local directories.\n\nWorkflow:\n1. Call list_repos to see what documentation is indexed\n2. Call search_docs with your query to find relevant docs\n3. Use browse_docs to explore the doc tree when search isn't specific enough\n4. Call update_docs if documentation seems stale or outdated\n5. If docs are missing, research the GitHub repo and doc paths, then use add_docs to index them (confirm with the user first)\n6. For local project docs, use add_docs with a filesystem path\n7. Use list_repos to check indexing progress for background operations\n\nSearch supports FTS5 syntax: \"exact phrase\", term1 AND term2, prefix*",
 		},
 	)
 
