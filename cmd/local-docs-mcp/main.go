@@ -24,12 +24,12 @@ func main() {
 
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: local-docs-mcp <command>\n")
-		fmt.Fprintf(os.Stderr, "Commands: serve, index, search, list, update, remove, browse\n")
+		fmt.Fprintf(os.Stderr, "Commands: stdio, index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
-	case "serve":
+	case "stdio":
 		runServe()
 	case "index":
 		runIndex()
@@ -45,13 +45,13 @@ func main() {
 		runBrowse()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
-		fmt.Fprintf(os.Stderr, "Commands: serve, index, search, list, update, remove, browse\n")
+		fmt.Fprintf(os.Stderr, "Commands: stdio, index, search, list, update, remove, browse\n")
 		os.Exit(1)
 	}
 }
 
 func runServe() {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	fs := flag.NewFlagSet("stdio", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config JSON file (optional, enables pre-configured repos)")
 	dbPath := fs.String("db", "", "override database path (optional, defaults to ~/.config/local-docs-mcp/docs.db)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
@@ -429,7 +429,7 @@ func updateFromDB(s *store.Store, ix *indexer.Indexer, aliasFilter string, force
 	}
 
 	if len(repos) == 0 {
-		fmt.Fprintf(os.Stderr, "No repos in database. Add docs first with 'local-docs-mcp serve' and the add_docs tool.\n")
+		fmt.Fprintf(os.Stderr, "No repos in database. Add docs first with 'local-docs-mcp stdio' and the add_docs tool.\n")
 		os.Exit(1)
 	}
 

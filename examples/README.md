@@ -29,7 +29,7 @@ covering Connect Sync, Cloud Sync, and general hybrid identity topics.
 
 5. Use as MCP server:
    ```
-   ./local-docs-mcp serve --config examples/entra-config.json
+   ./local-docs-mcp stdio --config examples/entra-config.json
    ```
 
 ### What gets indexed
@@ -51,7 +51,7 @@ Add to your `~/.claude/settings.json`:
   "mcpServers": {
     "local-docs-mcp": {
       "command": "/path/to/local-docs-mcp",
-      "args": ["serve", "--config", "/path/to/examples/entra-config.json"]
+      "args": ["stdio", "--config", "/path/to/examples/entra-config.json"]
     }
   }
 }

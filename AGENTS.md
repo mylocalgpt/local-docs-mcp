@@ -27,9 +27,10 @@ go vet ./...
 - `internal/mcpserver` - MCP server, tool handlers, background indexing
 - `internal/config` - JSON config loading (optional)
 
-## Architecture
+## Docs
 
-See `docs/design.md` for data flow and design decisions.
+- `docs/design.md` - Architecture, data flow, design decisions
+- `docs/cli.md` - CLI reference and standalone install
 
 ## Conventions
 

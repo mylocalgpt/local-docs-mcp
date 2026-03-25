@@ -18,7 +18,7 @@
 - remove_docs: Remove an indexed documentation source
 
 ## CLI Commands
-- serve: Start MCP server (config optional)
+- stdio: Start MCP server on stdio (config optional)
 - index: Index repos from config file
 - search: Search indexed docs from command line
 - list: List indexed repos

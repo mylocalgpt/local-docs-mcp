@@ -37,7 +37,7 @@ Sources                  Indexer              Store               Search        
 
 ### `cmd/local-docs-mcp`
 
-CLI entry point. Uses Go's standard `flag` package with manual `switch os.Args[1]` subcommand dispatch. Supports seven commands: serve, index, search, list, update, remove, browse. Initializes the store, indexer, search engine, and MCP server. Each command parses its own flag set.
+CLI entry point. Uses Go's standard `flag` package with manual `switch os.Args[1]` subcommand dispatch. Supports seven commands: stdio, index, search, list, update, remove, browse. Initializes the store, indexer, search engine, and MCP server. Each command parses its own flag set.
 
 ### `internal/store`
 

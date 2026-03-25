@@ -18,7 +18,7 @@
      "mcpServers": {
        "local-docs-mcp": {
          "command": "/absolute/path/to/local-docs-mcp",
-         "args": ["serve", "--config", "/absolute/path/to/examples/entra-config.json"]
+         "args": ["stdio", "--config", "/absolute/path/to/examples/entra-config.json"]
        }
      }
    }
@@ -46,4 +46,4 @@ Try the following queries in Claude Code and verify it uses the local-docs-mcp t
 
 - If no results, verify the index was built: `./local-docs-mcp search "connect sync"`
 - Check the DB exists: `ls -la ~/.local/share/local-docs-mcp/docs.db`
-- Verify MCP server starts: `./local-docs-mcp serve --config examples/entra-config.json`
+- Verify MCP server starts: `./local-docs-mcp stdio --config examples/entra-config.json`

@@ -6,31 +6,17 @@ Local documentation search for AI assistants, from Git repos and local directori
 
 An MCP server that gives AI assistants access to locally indexed documentation. It indexes GitHub repositories (via sparse checkout) and local directories into a SQLite database with FTS5 full-text search. Token budgeting keeps results within AI context window limits.
 
-## Install
-
-**npm:**
-```bash
-npx local-docs-mcp serve
-```
-
-**Go:**
-```bash
-go install github.com/mylocalgpt/local-docs-mcp/cmd/local-docs-mcp@latest
-```
-
-**Binary:** Download from [GitHub releases](https://github.com/mylocalgpt/local-docs-mcp/releases).
-
 ## Quick Start
 
-### 1. Add to your MCP client
+Add to your MCP client:
 
 **Claude Code** (`~/.claude.json`), **Cursor** (Settings > MCP), **Cline** (VS Code settings):
 ```json
 {
   "mcpServers": {
     "local-docs": {
-      "command": "local-docs-mcp",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "local-docs-mcp", "stdio"]
     }
   }
 }
@@ -41,14 +27,14 @@ go install github.com/mylocalgpt/local-docs-mcp/cmd/local-docs-mcp@latest
 {
   "servers": {
     "local-docs": {
-      "command": "local-docs-mcp",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "local-docs-mcp", "stdio"]
     }
   }
 }
 ```
 
-### 2. Use it
+### Example
 
 The AI assistant discovers and indexes documentation on the fly. For example:
 
@@ -74,97 +60,6 @@ No config files needed. The AI handles discovery, indexing, and search.
 | `add_docs` | Add a new git repo or local directory as a doc source |
 | `remove_docs` | Remove a documentation source |
 
-## CLI Reference
-
-All commands support `--db <path>` to override the default database path (`~/.config/local-docs-mcp/docs.db`).
-
-### `serve`
-
-Start the MCP server on stdio.
-
-```bash
-local-docs-mcp serve [--config <path>] [--db <path>]
-```
-
-The `--config` flag is optional. When provided, repos from the config file are pre-seeded into the database on startup.
-
-### `index`
-
-Index repos from a config file.
-
-```bash
-local-docs-mcp index --config <path> [--repo <alias>] [--db <path>]
-```
-
-### `search`
-
-Search indexed docs from the command line.
-
-```bash
-local-docs-mcp search <query> [--repo <alias>] [--limit N] [--tokens N] [--db <path>]
-```
-
-### `list`
-
-List indexed repos with status and doc counts.
-
-```bash
-local-docs-mcp list [--db <path>]
-```
-
-### `update`
-
-Re-index repos. Without `--config`, updates all repos from the database.
-
-```bash
-local-docs-mcp update [alias] [--config <path>] [--force] [--db <path>]
-```
-
-### `remove`
-
-Remove a repo and all its indexed documents.
-
-```bash
-local-docs-mcp remove <alias> [--db <path>]
-```
-
-### `browse`
-
-Navigate the doc tree. Without a path, lists files. With a path, shows headings.
-
-```bash
-local-docs-mcp browse <alias> [path] [--db <path>]
-```
-
-## Advanced: Config File
-
-For pre-seeding repos without AI interaction, create a config file:
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/mylocalgpt/local-docs-mcp/main/schema.json",
-  "repos": [
-    {
-      "url": "https://github.com/owner/repo",
-      "paths": ["docs/", "README.md"],
-      "alias": "my-docs"
-    }
-  ]
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `url` | GitHub repository URL |
-| `paths` | Subdirectory or file paths to index (sparse checkout) |
-| `alias` | Unique short name for this source |
-
-Pass it to `serve` or `index`:
-```bash
-local-docs-mcp serve --config ./config.json
-local-docs-mcp index --config ./config.json
-```
-
 ## How It Works
 
 - **Sparse checkout** - only fetches specified paths from GitHub repos, minimizing bandwidth
@@ -173,6 +68,11 @@ local-docs-mcp index --config ./config.json
 - **Token budgeting** - fits results within AI context window limits
 - **Background indexing** - `add_docs` returns immediately while indexing runs async
 - **Auto-refresh** - stale repos are re-indexed automatically on server startup
+
+## More
+
+- [CLI reference and standalone install](docs/cli.md)
+- [Architecture and design](docs/design.md)
 
 ## AI Agent Integration
 
