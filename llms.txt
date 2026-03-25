@@ -1,24 +1,34 @@
 # local-docs-mcp
 
-> MCP server that indexes documentation from GitHub repos into a local SQLite FTS5 cache for fast search by AI assistants.
+> Local documentation search for AI assistants, from Git repos and local directories
 
-## Quick Start
-- Create a config.json pointing to your repos and doc folders
-- Run: local-docs-mcp index --config config.json
-- Run: local-docs-mcp serve --config config.json
-- Add to your MCP client config (Claude Code, Cursor, Cline)
-
-## CLI Commands
-- local-docs-mcp index --config <path>
-- local-docs-mcp serve --config <path>
-- local-docs-mcp search <query>
-- local-docs-mcp list
-- local-docs-mcp update --config <path> [alias]
-- local-docs-mcp remove <alias>
-- local-docs-mcp browse <alias> [path]
+## Overview
+- AI-driven documentation indexer for MCP-compatible assistants
+- Indexes GitHub repos (sparse checkout) and local directories
+- SQLite FTS5 full-text search with BM25 ranking
+- Token budgeting for AI context windows
+- Config files optional; primary workflow is AI-driven via add_docs
 
 ## MCP Tools
-- search_docs: Full-text search with BM25 ranking
-- list_repos: Show indexed repos and status
-- browse_docs: Navigate doc tree structure
-- update_docs: Re-index from git repos
+- search_docs: Full-text search across indexed documentation
+- list_repos: List available documentation sources and indexing status
+- browse_docs: Explore documentation tree structure
+- update_docs: Re-index to pull latest changes
+- add_docs: Add new documentation from git repos or local directories
+- remove_docs: Remove an indexed documentation source
+
+## CLI Commands
+- serve: Start MCP server (config optional)
+- index: Index repos from config file
+- search: Search indexed docs from command line
+- list: List indexed repos
+- update: Re-index repos
+- remove: Remove a repo from the index
+- browse: Navigate doc tree
+
+## AI-Driven Workflow
+1. list_repos to discover available docs
+2. search_docs to find answers
+3. browse_docs to explore structure
+4. add_docs if needed docs are missing (research repo URL and doc paths first)
+5. list_repos to check indexing progress

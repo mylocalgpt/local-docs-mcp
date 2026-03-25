@@ -174,6 +174,10 @@ local-docs-mcp index --config ./config.json
 - **Background indexing** - `add_docs` returns immediately while indexing runs async
 - **Auto-refresh** - stale repos are re-indexed automatically on server startup
 
+## AI Agent Integration
+
+A `skills/local-docs-mcp/SKILL.md` is included for AI agent platforms that support the [agentskills.io](https://agentskills.io) specification. Copy or symlink the `skills/local-docs-mcp/` directory to your skills directory for enhanced tool usage guidance.
+
 ## Contributing
 
 PRs welcome. Run `go test ./...` before submitting.
