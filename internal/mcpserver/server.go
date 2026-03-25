@@ -61,6 +61,7 @@ func New(s *store.Store, srch *search.Search, ix *indexer.Indexer, cfg *config.C
 	srv.registerListReposTool()
 	srv.registerBrowseDocsTool()
 	srv.registerUpdateDocsTool()
+	srv.registerAddDocsTool()
 
 	return srv
 }
