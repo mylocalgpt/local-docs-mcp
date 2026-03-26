@@ -49,7 +49,8 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 					"Common issues: dots (.) are column selectors, colons (:) are prefix operators, "+
 					"parentheses group expressions. "+
 					"To search terms containing these characters literally, wrap them in double quotes. "+
-					"Example: \"app.settings.json\" instead of app.settings.json")
+					"Example: \"app.settings.json\" instead of app.settings.json. "+
+					"Details: %w", err)
 		}
 		return nil, nil, err
 	}

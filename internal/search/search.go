@@ -90,7 +90,13 @@ func (s *Search) Query(opts SearchOptions) (*SearchResponse, error) {
 	}
 
 	// 2. Execute FTS5 query
-	raw, err := s.store.SearchFTS(opts.Query, repoID, opts.Limit)
+	// Fetch enough raw results to cover the requested page after
+	// relevance filtering and chunk merging reduce the count.
+	fetchLimit := (page + 1) * pageSize * 3
+	if fetchLimit < opts.Limit {
+		fetchLimit = opts.Limit
+	}
+	raw, err := s.store.SearchFTS(opts.Query, repoID, fetchLimit)
 	if err != nil {
 		return nil, err
 	}
