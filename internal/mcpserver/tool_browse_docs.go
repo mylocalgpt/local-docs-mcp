@@ -65,6 +65,14 @@ func (s *Server) browseFiles(repoID int64, alias, url, sourceType string, page, 
 		}, nil, nil
 	}
 
+	if len(files) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{
+				Text: fmt.Sprintf("Page %d is beyond the %d files. Try a lower page number.", page, total),
+			}},
+		}, nil, nil
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "Files in %s (repo: %s):\n\n", alias, DisplayRepo(url, sourceType))
 

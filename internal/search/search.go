@@ -36,6 +36,7 @@ type SearchResult struct {
 	DocID        int64   // documents.id, needed for adjacency detection
 	RepoAlias    string
 	RepoURL      string
+	SourceType   string
 	Path         string
 	DocTitle     string
 	SectionTitle string
@@ -116,6 +117,7 @@ func (s *Search) Query(opts SearchOptions) (*SearchResponse, error) {
 			DocID:        r.DocID,
 			RepoAlias:    r.RepoAlias,
 			RepoURL:      r.RepoURL,
+			SourceType:   r.SourceType,
 			Path:         r.Path,
 			DocTitle:     r.DocTitle,
 			SectionTitle: r.SectionTitle,

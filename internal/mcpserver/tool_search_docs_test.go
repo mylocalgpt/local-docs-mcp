@@ -355,7 +355,7 @@ func TestSearchDocsPaginationBeyondRange(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "beyond") {
-		t.Errorf("expected 'beyond' in message, got: %s", text.Text)
+	if !strings.Contains(text.Text, "no results") {
+		t.Errorf("expected 'no results' in message, got: %s", text.Text)
 	}
 }

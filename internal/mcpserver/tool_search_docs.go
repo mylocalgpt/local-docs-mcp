@@ -67,8 +67,7 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 				Content: []mcp.Content{&mcp.TextContent{Text: text}},
 			}, nil, nil
 		}
-		text := fmt.Sprintf("Page %d is beyond the %d total results. Try a lower page number.",
-			resp.Page, resp.TotalResults)
+		text := fmt.Sprintf("Page %d has no results. Try a lower page number.", resp.Page)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -80,11 +79,11 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		totalTokens += r.Tokens
 	}
 
-	totalPages := (resp.TotalResults + resp.PageSize - 1) / resp.PageSize
+	hasMore := resp.Page*resp.PageSize < resp.TotalResults
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d results on page %d of %d (%d total, %d tokens)\n\n",
-		len(resp.Results), resp.Page, totalPages, resp.TotalResults, totalTokens)
+	fmt.Fprintf(&b, "Found %d results (page %d, %d tokens)\n\n",
+		len(resp.Results), resp.Page, totalTokens)
 
 	for _, r := range resp.Results {
 		title := r.SectionTitle
@@ -92,12 +91,11 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 			title = r.DocTitle
 		}
 		fmt.Fprintf(&b, "## repo: %s | alias: %s | %s > %s\n%s\n\n---\n\n",
-			DisplayRepo(r.RepoURL, ""), r.RepoAlias, r.Path, title, r.Content)
+			DisplayRepo(r.RepoURL, r.SourceType), r.RepoAlias, r.Path, title, r.Content)
 	}
 
-	if resp.Page < totalPages {
-		fmt.Fprintf(&b, "Page %d of %d (%d total results). Use page: %d to see more.\n",
-			resp.Page, totalPages, resp.TotalResults, resp.Page+1)
+	if hasMore {
+		fmt.Fprintf(&b, "More results available. Use page: %d to see more.\n", resp.Page+1)
 	}
 
 	return &mcp.CallToolResult{
