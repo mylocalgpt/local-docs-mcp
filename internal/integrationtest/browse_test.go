@@ -18,7 +18,7 @@ func TestBrowseFiles(t *testing.T) {
 		t.Fatal("repo entra-hybrid not found")
 	}
 
-	files, err := s.BrowseFiles(repo.ID)
+	files, _, err := s.BrowseFiles(repo.ID, 1, 1000)
 	if err != nil {
 		t.Fatalf("browse files: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestBrowseHeadings(t *testing.T) {
 		t.Fatal("repo entra-hybrid not found")
 	}
 
-	files, err := s.BrowseFiles(repo.ID)
+	files, _, err := s.BrowseFiles(repo.ID, 1, 1000)
 	if err != nil {
 		t.Fatalf("browse files: %v", err)
 	}

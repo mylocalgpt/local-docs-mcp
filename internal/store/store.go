@@ -302,13 +302,23 @@ func (s *Store) DeleteRepo(alias string) (int, error) {
 	return docCount, nil
 }
 
-// BrowseFiles returns the list of files and their section counts for a repo.
-func (s *Store) BrowseFiles(repoID int64) ([]FileInfo, error) {
-	rows, err := s.db.Query(
-		"SELECT path, COUNT(*) as sections FROM documents WHERE repo_id = ? GROUP BY path ORDER BY path",
-		repoID)
+// BrowseFiles returns a page of files and their section counts for a repo.
+// It also returns the total number of distinct files for pagination.
+func (s *Store) BrowseFiles(repoID int64, page, pageSize int) ([]FileInfo, int, error) {
+	var total int
+	err := s.db.QueryRow(
+		"SELECT COUNT(DISTINCT path) FROM documents WHERE repo_id = ?", repoID,
+	).Scan(&total)
 	if err != nil {
-		return nil, fmt.Errorf("browse files: %w", err)
+		return nil, 0, fmt.Errorf("count files: %w", err)
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := s.db.Query(
+		"SELECT path, COUNT(*) as sections FROM documents WHERE repo_id = ? GROUP BY path ORDER BY path LIMIT ? OFFSET ?",
+		repoID, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("browse files: %w", err)
 	}
 	defer rows.Close()
 
@@ -316,11 +326,11 @@ func (s *Store) BrowseFiles(repoID int64) ([]FileInfo, error) {
 	for rows.Next() {
 		var f FileInfo
 		if err := rows.Scan(&f.Path, &f.Sections); err != nil {
-			return nil, fmt.Errorf("scan file info: %w", err)
+			return nil, 0, fmt.Errorf("scan file info: %w", err)
 		}
 		files = append(files, f)
 	}
-	return files, rows.Err()
+	return files, total, rows.Err()
 }
 
 // BrowseHeadings returns the headings for a specific file in a repo, ordered

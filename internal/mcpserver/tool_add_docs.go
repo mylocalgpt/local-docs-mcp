@@ -171,7 +171,8 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 		return nil, nil, fmt.Errorf("set status: %w", err)
 	}
 
-	// Launch background indexing.
+	// Launch background indexing. Lock is acquired in the handler and
+	// released in the goroutine (valid cross-goroutine mutex transfer).
 	go func() {
 		defer s.indexMu.Unlock()
 

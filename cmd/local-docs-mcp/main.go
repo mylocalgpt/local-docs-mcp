@@ -544,7 +544,7 @@ func runBrowse() {
 
 	if len(args) < 2 {
 		// List files
-		files, err := s.BrowseFiles(repo.ID)
+		files, _, err := s.BrowseFiles(repo.ID, 1, 1000)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

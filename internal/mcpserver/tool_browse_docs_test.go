@@ -310,3 +310,153 @@ func TestBrowseDocsUnknownPath(t *testing.T) {
 		t.Errorf("expected path in message, got: %s", text.Text)
 	}
 }
+
+// setupBrowsePaginationTest creates a store with 5 distinct file paths for pagination testing.
+func setupBrowsePaginationTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession, func()) {
+	t.Helper()
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	repoID, err := s.UpsertRepo("paged", "https://example.com/paged.git", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	docs := []store.Document{
+		{RepoID: repoID, Path: "docs/a.md", DocTitle: "A", SectionTitle: "A", Content: "a", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "docs/b.md", DocTitle: "B", SectionTitle: "B", Content: "b", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "docs/c.md", DocTitle: "C", SectionTitle: "C", Content: "c", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "docs/d.md", DocTitle: "D", SectionTitle: "D", Content: "d", Tokens: 10, HeadingLevel: 1},
+		{RepoID: repoID, Path: "docs/e.md", DocTitle: "E", SectionTitle: "E", Content: "e", Tokens: 10, HeadingLevel: 1},
+	}
+
+	if err := s.ReplaceDocuments(repoID, docs); err != nil {
+		t.Fatalf("replace documents: %v", err)
+	}
+
+	srch := search.NewSearch(s)
+	cfg := &config.Config{}
+	srv := New(s, srch, nil, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	st, ct := mcp.NewInMemoryTransports()
+
+	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
+	if err != nil {
+		cancel()
+		s.Close()
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	clientSession, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		cancel()
+		s.Close()
+		t.Fatalf("client connect: %v", err)
+	}
+
+	cleanup := func() {
+		clientSession.Close()
+		serverSession.Wait()
+		cancel()
+		s.Close()
+	}
+
+	return clientSession, serverSession, cleanup
+}
+
+func TestBrowseDocsFileListPagination(t *testing.T) {
+	cs, _, cleanup := setupBrowsePaginationTest(t)
+	defer cleanup()
+
+	// Page 1 with page_size=2
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "browse_docs",
+		Arguments: map[string]any{
+			"repo":      "paged",
+			"page":      1,
+			"page_size": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("unexpected tool error")
+	}
+
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+
+	if !strings.Contains(text.Text, "Showing files 1-2 of 5") {
+		t.Errorf("expected pagination footer, got: %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "Use page: 2 to see more") {
+		t.Errorf("expected next page hint, got: %s", text.Text)
+	}
+
+	// Page 2
+	result2, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "browse_docs",
+		Arguments: map[string]any{
+			"repo":      "paged",
+			"page":      2,
+			"page_size": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool page 2: %v", err)
+	}
+	if result2.IsError {
+		t.Fatal("unexpected tool error on page 2")
+	}
+
+	text2, ok := result2.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result2.Content[0])
+	}
+
+	if !strings.Contains(text2.Text, "Showing files 3-4 of 5") {
+		t.Errorf("expected page 2 range, got: %s", text2.Text)
+	}
+}
+
+func TestBrowseDocsHeadingsIgnoresPagination(t *testing.T) {
+	cs, _, cleanup := setupBrowseTest(t)
+	defer cleanup()
+
+	// Call with path and page=2 - pagination should be ignored for headings
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "browse_docs",
+		Arguments: map[string]any{
+			"repo": "myrepo",
+			"path": "docs/getting-started.md",
+			"page": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("unexpected tool error")
+	}
+
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+
+	// Should still show all headings (page param ignored in heading mode)
+	if !strings.Contains(text.Text, "# Getting Started") {
+		t.Error("expected '# Getting Started' heading")
+	}
+	if !strings.Contains(text.Text, "3 sections") {
+		t.Error("expected '3 sections' in summary")
+	}
+}

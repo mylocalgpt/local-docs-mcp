@@ -194,7 +194,7 @@ func TestIntegrationBrowse(t *testing.T) {
 	defer s.Close()
 
 	// Browse files
-	files, err := s.BrowseFiles(repoA)
+	files, _, err := s.BrowseFiles(repoA, 1, 1000)
 	if err != nil {
 		t.Fatalf("browse files: %v", err)
 	}

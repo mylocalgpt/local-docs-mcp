@@ -10,8 +10,10 @@ import (
 
 // BrowseDocsInput defines the input schema for the browse_docs tool.
 type BrowseDocsInput struct {
-	Repo string `json:"repo" jsonschema:"Repo alias to browse. Use list_repos to see available repos."`
-	Path string `json:"path,omitempty" jsonschema:"File path to drill into. Omit to list all doc files in the repo."`
+	Repo     string `json:"repo" jsonschema:"Repo alias to browse. Use list_repos to see available repos."`
+	Path     string `json:"path,omitempty" jsonschema:"File path to drill into. Omit to list all doc files in the repo."`
+	Page     int    `json:"page,omitempty" jsonschema:"Page number (1-indexed). Default 1. Only applies to file listing mode."`
+	PageSize int    `json:"page_size,omitempty" jsonschema:"Files per page. Default 30, max 100. Only applies to file listing mode."`
 }
 
 // registerBrowseDocsTool registers the browse_docs tool on the MCP server.
@@ -33,19 +35,29 @@ func (s *Server) handleBrowseDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	}
 
 	if input.Path == "" {
-		return s.browseFiles(repo.ID, repo.Alias, repo.URL, repo.SourceType)
+		return s.browseFiles(repo.ID, repo.Alias, repo.URL, repo.SourceType, input.Page, input.PageSize)
 	}
 	return s.browseHeadings(repo.ID, repo.Alias, repo.URL, repo.SourceType, input.Path)
 }
 
-// browseFiles lists all files in a repo with their section counts.
-func (s *Server) browseFiles(repoID int64, alias, url, sourceType string) (*mcp.CallToolResult, any, error) {
-	files, err := s.store.BrowseFiles(repoID)
+// browseFiles lists files in a repo with their section counts, with pagination.
+func (s *Server) browseFiles(repoID int64, alias, url, sourceType string, page, pageSize int) (*mcp.CallToolResult, any, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 30
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	files, total, err := s.store.BrowseFiles(repoID, page, pageSize)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if len(files) == 0 {
+	if total == 0 {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{
 				Text: fmt.Sprintf("No files found in %s. The repo may need to be indexed first.", alias),
@@ -62,7 +74,20 @@ func (s *Server) browseFiles(repoID int64, alias, url, sourceType string) (*mcp.
 		totalSections += f.Sections
 	}
 
-	fmt.Fprintf(&b, "\n%d files, %d sections total. Specify a path to see headings within a file.\n", len(files), totalSections)
+	totalPages := (total + pageSize - 1) / pageSize
+	startIdx := (page-1)*pageSize + 1
+	endIdx := startIdx + len(files) - 1
+
+	if totalPages > 1 {
+		fmt.Fprintf(&b, "\nShowing files %d-%d of %d.", startIdx, endIdx, total)
+		if page < totalPages {
+			fmt.Fprintf(&b, " Use page: %d to see more.", page+1)
+		}
+		fmt.Fprintf(&b, "\n")
+	} else {
+		fmt.Fprintf(&b, "\n%d files, %d sections total. Specify a path to see headings within a file.\n",
+			total, totalSections)
+	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},

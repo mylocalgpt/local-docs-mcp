@@ -282,9 +282,12 @@ func TestBrowseFiles(t *testing.T) {
 		{RepoID: repoID, Path: "docs/api.md", DocTitle: "API", SectionTitle: "Overview", Content: "overview", Tokens: 15, HeadingLevel: 1},
 	})
 
-	files, err := s.BrowseFiles(repoID)
+	files, total, err := s.BrowseFiles(repoID, 1, 1000)
 	if err != nil {
 		t.Fatalf("BrowseFiles: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2, got %d", total)
 	}
 	if len(files) != 2 {
 		t.Fatalf("expected 2 files, got %d", len(files))
