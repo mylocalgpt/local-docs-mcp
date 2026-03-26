@@ -132,8 +132,8 @@ func TestMCPSearchDocs(t *testing.T) {
 	text := extractMCPText(t, result)
 	t.Logf("search_docs output (first 500 chars):\n%.500s", text)
 
-	if !strings.Contains(text, "Found") {
-		t.Error("expected 'Found' in search output")
+	if !strings.Contains(text, "Showing") {
+		t.Error("expected 'Showing' in search output")
 	}
 }
 

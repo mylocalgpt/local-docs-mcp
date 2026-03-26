@@ -166,6 +166,9 @@ func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([
 
 			chunks := ProcessMarkdownFile(relPath, string(data))
 			for _, c := range chunks {
+				if len(strings.TrimSpace(c.Content)) < 10 {
+					continue
+				}
 				docs = append(docs, store.Document{
 					RepoID:       repoID,
 					Path:         relPath,

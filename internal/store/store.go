@@ -32,6 +32,12 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	if dbPath == ":memory:" {
+		// SQLite :memory: databases are per-connection. With a connection
+		// pool, each connection gets a separate empty database. Pin to a
+		// single connection so schema and data are shared.
+		db.SetMaxOpenConns(1)
+	}
 
 	// Pragmas must be set per-connection, outside any transaction.
 	pragmas := []string{
@@ -70,7 +76,61 @@ func NewStore(dbPath string) (*Store, error) {
 		}
 	}
 
+	// Drop the UNIQUE(repo_id, path, section_title) constraint from documents.
+	// A file can have sections with the same title under different headings,
+	// and ReplaceDocuments already deletes all docs before re-inserting.
+	if hasUniqueConstraint(db, "documents") {
+		migrationSQL := `
+			DROP TRIGGER IF EXISTS docs_ai;
+			DROP TRIGGER IF EXISTS docs_ad;
+			DROP TRIGGER IF EXISTS docs_au;
+			DROP TABLE IF EXISTS docs_fts;
+
+			CREATE TABLE documents_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				repo_id INTEGER NOT NULL REFERENCES repos(id),
+				path TEXT NOT NULL,
+				doc_title TEXT NOT NULL,
+				section_title TEXT NOT NULL,
+				content TEXT NOT NULL,
+				tokens INTEGER NOT NULL,
+				heading_level INTEGER,
+				has_code INTEGER DEFAULT 0
+			);
+			INSERT INTO documents_new SELECT * FROM documents;
+			DROP TABLE documents;
+			ALTER TABLE documents_new RENAME TO documents;
+		`
+		if _, err := db.Exec(migrationSQL); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate documents table: %w", err)
+		}
+		// Recreate FTS virtual table and triggers after table recreation
+		if _, err := db.Exec(schema); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("recreate fts: %w", err)
+		}
+		// Rebuild FTS index from existing data
+		if _, err := db.Exec("INSERT INTO docs_fts(docs_fts) VALUES('rebuild')"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("rebuild fts after migration: %w", err)
+		}
+	}
+
 	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// hasUniqueConstraint checks whether a SQLite table has any UNIQUE
+// constraint in its CREATE TABLE definition (excluding PRIMARY KEY).
+func hasUniqueConstraint(db *sql.DB, table string) bool {
+	var ddl string
+	err := db.QueryRow(
+		"SELECT sql FROM sqlite_master WHERE type='table' AND name=?", table,
+	).Scan(&ddl)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(ddl), "UNIQUE")
 }
 
 // DBPath returns the path to the underlying database file.
@@ -173,7 +233,17 @@ func (s *Store) ReplaceDocuments(repoID int64, docs []Document) error {
 	}
 	defer stmt.Close()
 
+	type dedupKey struct{ path, content string }
+	seen := make(map[dedupKey]bool, len(docs))
+
 	for _, d := range docs {
+		// Skip exact content duplicates within the same path
+		dk := dedupKey{d.Path, d.Content}
+		if seen[dk] {
+			continue
+		}
+		seen[dk] = true
+
 		hasCode := 0
 		if d.HasCode {
 			hasCode = 1

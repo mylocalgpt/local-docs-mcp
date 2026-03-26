@@ -24,8 +24,7 @@ CREATE TABLE IF NOT EXISTS documents (
     content TEXT NOT NULL,
     tokens INTEGER NOT NULL,
     heading_level INTEGER,
-    has_code INTEGER DEFAULT 0,
-    UNIQUE(repo_id, path, section_title)
+    has_code INTEGER DEFAULT 0
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
