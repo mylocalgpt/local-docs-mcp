@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running pre-push checks..."
+
+echo "=> go vet"
+go vet ./...
+
+echo "=> go test"
+go test ./...
+
+echo "=> go build"
+go build -o /dev/null ./cmd/local-docs-mcp
+
+echo "All pre-push checks passed."
