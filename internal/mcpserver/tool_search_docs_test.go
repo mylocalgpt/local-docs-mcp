@@ -200,8 +200,37 @@ func TestSearchDocsFTS5Error(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(strings.ToLower(text.Text), "syntax error") {
-		t.Errorf("expected syntax error message, got: %s", text.Text)
+	if !strings.Contains(text.Text, "FTS5") {
+		t.Errorf("expected FTS5 mentioned in error, got: %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "double quotes") {
+		t.Errorf("expected quoting guidance in error, got: %s", text.Text)
+	}
+}
+
+func TestSearchDocsFTS5ErrorWithDots(t *testing.T) {
+	cs, _, cleanup := setupSearchTest(t)
+	defer cleanup()
+
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "search_docs",
+		Arguments: map[string]any{
+			"query": "app.config.json settings",
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+
+	if !result.IsError {
+		// Dots may not always trigger an FTS5 error depending on the SQLite version.
+		// If it doesn't error, that's acceptable; skip the rest of the test.
+		t.Skip("dotted query did not trigger FTS5 error in this environment")
+	}
+
+	text := result.Content[0].(*mcp.TextContent)
+	if !strings.Contains(text.Text, "FTS5") {
+		t.Errorf("expected FTS5 in error, got: %s", text.Text)
 	}
 }
 

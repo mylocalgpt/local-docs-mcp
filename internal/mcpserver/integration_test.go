@@ -210,8 +210,8 @@ func TestIntegrationSearchDocsBadFTS5(t *testing.T) {
 
 	text := extractText(t, result)
 
-	if !strings.Contains(strings.ToLower(text), "syntax error") {
-		t.Errorf("expected 'syntax error' in error message, got: %s", text)
+	if !strings.Contains(text, "FTS5") {
+		t.Errorf("expected 'FTS5' in error message, got: %s", text)
 	}
 }
 

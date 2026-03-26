@@ -39,7 +39,13 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	if err != nil {
 		errLower := strings.ToLower(err.Error())
 		if strings.Contains(errLower, "fts5") || strings.Contains(errLower, "fts:") || strings.Contains(errLower, "fts syntax") {
-			return nil, nil, fmt.Errorf("search syntax error: %v. Try quoting your query or simplifying boolean operators", err)
+			return nil, nil, fmt.Errorf(
+				"search failed: the query contains characters that conflict with FTS5 search syntax "+
+					"(the query language used by this search engine). "+
+					"Common issues: dots (.) are column selectors, colons (:) are prefix operators, "+
+					"parentheses group expressions. "+
+					"To search terms containing these characters literally, wrap them in double quotes. "+
+					"Example: \"app.settings.json\" instead of app.settings.json")
 		}
 		return nil, nil, err
 	}
