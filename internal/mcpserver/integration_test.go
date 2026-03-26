@@ -179,8 +179,8 @@ func TestIntegrationSearchDocs(t *testing.T) {
 
 	text := extractText(t, result)
 
-	if !strings.Contains(text, "Found") {
-		t.Error("expected 'Found' summary in search results")
+	if !strings.Contains(text, "Showing") {
+		t.Error("expected 'Showing' summary in search results")
 	}
 	if !strings.Contains(text, "Installation") {
 		t.Error("expected 'Installation' section in search results")

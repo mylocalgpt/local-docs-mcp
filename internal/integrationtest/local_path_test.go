@@ -54,7 +54,7 @@ func TestLocalPathIndexAndSearch(t *testing.T) {
 
 	// Search indexed content
 	srch := search.NewSearch(s)
-	results, err := srch.Query(search.SearchOptions{
+	resp, err := srch.Query(search.SearchOptions{
 		Query:       "installation",
 		TokenBudget: 2000,
 		Limit:       10,
@@ -62,7 +62,7 @@ func TestLocalPathIndexAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Error("expected search results for 'installation'")
 	}
 }

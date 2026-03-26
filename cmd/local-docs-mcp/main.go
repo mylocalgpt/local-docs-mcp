@@ -263,6 +263,7 @@ func runSearch() {
 		Query:       query,
 		RepoAlias:   *repoAlias,
 		Limit:       *limit,
+		PageSize:    *limit,
 		TokenBudget: *tokens,
 	})
 	if err != nil {

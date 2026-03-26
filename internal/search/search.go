@@ -97,6 +97,9 @@ func (s *Search) Query(opts SearchOptions) (*SearchResponse, error) {
 	if fetchLimit < opts.Limit {
 		fetchLimit = opts.Limit
 	}
+	if fetchLimit > 500 {
+		fetchLimit = 500
+	}
 	raw, err := s.store.SearchFTS(opts.Query, repoID, fetchLimit)
 	if err != nil {
 		return nil, err

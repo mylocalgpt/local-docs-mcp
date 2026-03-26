@@ -116,11 +116,11 @@ func TestUpdateForceReindex(t *testing.T) {
 	}
 
 	srch := search.NewSearch(s)
-	results, err := srch.Query(search.SearchOptions{Query: "connect sync", TokenBudget: 2000})
+	resp, err := srch.Query(search.SearchOptions{Query: "connect sync", TokenBudget: 2000})
 	if err != nil {
 		t.Fatalf("search after reindex: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Error("expected search results after force reindex")
 	}
 }

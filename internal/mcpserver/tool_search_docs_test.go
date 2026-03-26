@@ -128,8 +128,8 @@ func TestSearchDocsWithResults(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "Found") {
-		t.Errorf("expected summary line with 'Found', got: %s", text.Text[:min(100, len(text.Text))])
+	if !strings.Contains(text.Text, "Showing") {
+		t.Errorf("expected summary line with 'Showing', got: %s", text.Text[:min(100, len(text.Text))])
 	}
 	if !strings.Contains(text.Text, "Installation") {
 		t.Errorf("expected 'Installation' section in results, got: %s", text.Text[:min(200, len(text.Text))])
@@ -297,7 +297,7 @@ func TestSearchDocsWithTokenLimit(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "Found") {
+	if !strings.Contains(text.Text, "Showing") {
 		t.Errorf("expected summary line, got: %s", text.Text[:min(100, len(text.Text))])
 	}
 }
@@ -355,7 +355,7 @@ func TestSearchDocsPaginationBeyondRange(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	if !strings.Contains(text.Text, "no results") {
-		t.Errorf("expected 'no results' in message, got: %s", text.Text)
+	if !strings.Contains(text.Text, "beyond") {
+		t.Errorf("expected 'beyond' in message, got: %s", text.Text)
 	}
 }

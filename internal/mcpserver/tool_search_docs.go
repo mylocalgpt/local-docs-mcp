@@ -67,7 +67,7 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 				Content: []mcp.Content{&mcp.TextContent{Text: text}},
 			}, nil, nil
 		}
-		text := fmt.Sprintf("Page %d has no results. Try a lower page number.", resp.Page)
+		text := fmt.Sprintf("Page %d is beyond the available results. Try a lower page number.", resp.Page)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -82,7 +82,7 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	hasMore := resp.Page*resp.PageSize < resp.TotalResults
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d results (page %d, %d tokens)\n\n",
+	fmt.Fprintf(&b, "Showing %d results (page %d, %d tokens)\n\n",
 		len(resp.Results), resp.Page, totalTokens)
 
 	for _, r := range resp.Results {
