@@ -41,6 +41,7 @@ type RawSearchResult struct {
 	DocID        int64
 	RepoID       int64
 	RepoAlias    string
+	RepoURL      string
 	Path         string
 	DocTitle     string
 	SectionTitle string

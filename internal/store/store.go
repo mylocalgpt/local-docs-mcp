@@ -203,7 +203,7 @@ func (s *Store) RebuildFTS() error {
 // results are filtered to that repo. Returns up to limit raw results ordered
 // by BM25 score (lower/more negative = better match).
 func (s *Store) SearchFTS(query string, repoID *int64, limit int) ([]RawSearchResult, error) {
-	baseSQL := `SELECT d.id, d.repo_id, r.alias, d.path, d.doc_title, d.section_title,
+	baseSQL := `SELECT d.id, d.repo_id, r.alias, r.url, d.path, d.doc_title, d.section_title,
 	       d.heading_level, d.content, d.tokens,
 	       snippet(docs_fts, 2, '**', '**', '...', 48) AS excerpt,
 	       bm25(docs_fts, 5.0, 10.0, 1.0) AS score
@@ -231,7 +231,7 @@ func (s *Store) SearchFTS(query string, repoID *int64, limit int) ([]RawSearchRe
 	var results []RawSearchResult
 	for rows.Next() {
 		var r RawSearchResult
-		if err := rows.Scan(&r.DocID, &r.RepoID, &r.RepoAlias, &r.Path, &r.DocTitle,
+		if err := rows.Scan(&r.DocID, &r.RepoID, &r.RepoAlias, &r.RepoURL, &r.Path, &r.DocTitle,
 			&r.SectionTitle, &r.HeadingLevel, &r.Content, &r.Tokens,
 			&r.Excerpt, &r.Score); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
