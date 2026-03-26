@@ -144,7 +144,7 @@ func TestBrowseDocsFileList(t *testing.T) {
 	}
 
 	// Check header
-	if !strings.Contains(text.Text, "Files in myrepo:") {
+	if !strings.Contains(text.Text, "Files in myrepo (repo: example.com/repo):") {
 		t.Errorf("expected header, got: %s", text.Text[:min(100, len(text.Text))])
 	}
 
@@ -202,7 +202,7 @@ func TestBrowseDocsHeadingTree(t *testing.T) {
 	}
 
 	// Check header
-	if !strings.Contains(text.Text, "myrepo: docs/getting-started.md") {
+	if !strings.Contains(text.Text, "myrepo (repo: example.com/repo): docs/getting-started.md") {
 		t.Errorf("expected header, got: %s", text.Text[:min(100, len(text.Text))])
 	}
 

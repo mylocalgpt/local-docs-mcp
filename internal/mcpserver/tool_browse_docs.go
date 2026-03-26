@@ -33,13 +33,13 @@ func (s *Server) handleBrowseDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	}
 
 	if input.Path == "" {
-		return s.browseFiles(repo.ID, repo.Alias)
+		return s.browseFiles(repo.ID, repo.Alias, repo.URL, repo.SourceType)
 	}
-	return s.browseHeadings(repo.ID, repo.Alias, input.Path)
+	return s.browseHeadings(repo.ID, repo.Alias, repo.URL, repo.SourceType, input.Path)
 }
 
 // browseFiles lists all files in a repo with their section counts.
-func (s *Server) browseFiles(repoID int64, alias string) (*mcp.CallToolResult, any, error) {
+func (s *Server) browseFiles(repoID int64, alias, url, sourceType string) (*mcp.CallToolResult, any, error) {
 	files, err := s.store.BrowseFiles(repoID)
 	if err != nil {
 		return nil, nil, err
@@ -54,7 +54,7 @@ func (s *Server) browseFiles(repoID int64, alias string) (*mcp.CallToolResult, a
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Files in %s:\n\n", alias)
+	fmt.Fprintf(&b, "Files in %s (repo: %s):\n\n", alias, DisplayRepo(url, sourceType))
 
 	totalSections := 0
 	for _, f := range files {
@@ -70,7 +70,7 @@ func (s *Server) browseFiles(repoID int64, alias string) (*mcp.CallToolResult, a
 }
 
 // browseHeadings shows the heading tree for a specific file in a repo.
-func (s *Server) browseHeadings(repoID int64, alias, path string) (*mcp.CallToolResult, any, error) {
+func (s *Server) browseHeadings(repoID int64, alias, url, sourceType, path string) (*mcp.CallToolResult, any, error) {
 	headings, err := s.store.BrowseHeadings(repoID, path)
 	if err != nil {
 		return nil, nil, err
@@ -93,7 +93,7 @@ func (s *Server) browseHeadings(repoID int64, alias, path string) (*mcp.CallTool
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s: %s\n\n", alias, path)
+	fmt.Fprintf(&b, "%s (repo: %s): %s\n\n", alias, DisplayRepo(url, sourceType), path)
 
 	totalTokens := 0
 	for _, h := range headings {

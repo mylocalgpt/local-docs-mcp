@@ -45,7 +45,8 @@ func (s *Server) handleListRepos(_ context.Context, _ *mcp.CallToolRequest, _ Li
 		statusText := formatRepoStatus(&r)
 		contentSize, _ := s.store.RepoContentSize(r.ID)
 
-		fmt.Fprintf(&b, "\n%s [%s] (%d docs, %s)\n", r.Alias, r.SourceType, r.DocCount, formatBytes(contentSize))
+		fmt.Fprintf(&b, "\n%s (repo: %s) [%s] (%d docs, %s)\n",
+			r.Alias, DisplayRepo(r.URL, r.SourceType), r.SourceType, r.DocCount, formatBytes(contentSize))
 		fmt.Fprintf(&b, "  URL: %s\n", r.URL)
 		fmt.Fprintf(&b, "  Status: %s\n", statusText)
 		if r.IndexedAt != "" {

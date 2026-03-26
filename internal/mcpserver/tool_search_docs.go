@@ -45,7 +45,12 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	}
 
 	if len(results) == 0 {
-		text := fmt.Sprintf("No results found for %q. Try different search terms or check available repos with list_repos.", input.Query)
+		var text string
+		if input.Repo != "" {
+			text = fmt.Sprintf("No results for %q in alias %q. Try searching without a repo filter, or use list_repos to see available sources.", input.Query, input.Repo)
+		} else {
+			text = fmt.Sprintf("No results found for %q. Try different search terms or check available repos with list_repos.", input.Query)
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -65,7 +70,8 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		if title == "" {
 			title = r.DocTitle
 		}
-		fmt.Fprintf(&b, "## %s: %s > %s\n%s\n\n---\n\n", r.RepoAlias, r.Path, title, r.Content)
+		fmt.Fprintf(&b, "## repo: %s | alias: %s | %s > %s\n%s\n\n---\n\n",
+			DisplayRepo(r.RepoURL, ""), r.RepoAlias, r.Path, title, r.Content)
 	}
 
 	return &mcp.CallToolResult{
