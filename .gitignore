@@ -12,6 +12,7 @@ _docs/
 # GoReleaser output
 dist/
 
-# npm package
-npm/bin/
+# npm package (keep cli.js, ignore downloaded binaries)
+npm/bin/*
+!npm/bin/cli.js
 npm/node_modules/
