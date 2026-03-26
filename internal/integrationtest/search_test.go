@@ -28,18 +28,18 @@ func TestSearchKnownQueries(t *testing.T) {
 			s := openTestStore(t)
 			srch := search.NewSearch(s)
 
-			results, err := srch.Query(search.SearchOptions{
+			resp, err := srch.Query(search.SearchOptions{
 				Query:       tt.query,
 				TokenBudget: 2000,
 			})
 			if err != nil {
 				t.Fatalf("search error: %v", err)
 			}
-			if len(results) == 0 {
+			if len(resp.Results) == 0 {
 				t.Fatal("expected at least 1 result, got 0")
 			}
 
-			top := results[0]
+			top := resp.Results[0]
 			t.Logf("top result: path=%s title=%s section=%s score=%.4f", top.Path, top.DocTitle, top.SectionTitle, top.Score)
 
 			if tt.expectFile != "" && !strings.Contains(top.Path, tt.expectFile) {
@@ -60,7 +60,7 @@ func TestSearchRelevanceFilter(t *testing.T) {
 	s := openTestStore(t)
 	srch := search.NewSearch(s)
 
-	results, err := srch.Query(search.SearchOptions{
+	resp, err := srch.Query(search.SearchOptions{
 		Query:       "sync",
 		TokenBudget: 4000,
 		Limit:       50,
@@ -68,15 +68,15 @@ func TestSearchRelevanceFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search error: %v", err)
 	}
-	if len(results) < 2 {
-		t.Fatalf("expected multiple results for broad query 'sync', got %d", len(results))
+	if len(resp.Results) < 2 {
+		t.Fatalf("expected multiple results for broad query 'sync', got %d", len(resp.Results))
 	}
 
-	bestScore := results[0].Score
+	bestScore := resp.Results[0].Score
 	threshold := bestScore * 0.5
-	t.Logf("best score: %.4f, threshold: %.4f, results: %d", bestScore, threshold, len(results))
+	t.Logf("best score: %.4f, threshold: %.4f, results: %d", bestScore, threshold, len(resp.Results))
 
-	for _, r := range results {
+	for _, r := range resp.Results {
 		if r.Score > threshold {
 			t.Errorf("result %q score %.4f outside relevance window (best: %.4f, threshold: %.4f)", r.Path, r.Score, bestScore, threshold)
 		}
@@ -87,25 +87,25 @@ func TestSearchTokenBudget(t *testing.T) {
 	s := openTestStore(t)
 	srch := search.NewSearch(s)
 
-	results, err := srch.Query(search.SearchOptions{
+	resp, err := srch.Query(search.SearchOptions{
 		Query:       "connect sync",
 		TokenBudget: 500,
 	})
 	if err != nil {
 		t.Fatalf("search error: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected results, got 0")
 	}
 
 	var total int
-	for _, r := range results {
+	for _, r := range resp.Results {
 		total += r.Tokens
 	}
-	t.Logf("results: %d, total tokens: %d", len(results), total)
+	t.Logf("results: %d, total tokens: %d", len(resp.Results), total)
 
-	if len(results) > 1 {
-		withoutLast := total - results[len(results)-1].Tokens
+	if len(resp.Results) > 1 {
+		withoutLast := total - resp.Results[len(resp.Results)-1].Tokens
 		if withoutLast > 500 {
 			t.Errorf("token budget violated: %d tokens before last result (budget: 500)", withoutLast)
 		}
@@ -116,7 +116,7 @@ func TestSearchAdjacentMerge(t *testing.T) {
 	s := openTestStore(t)
 	srch := search.NewSearch(s)
 
-	results, err := srch.Query(search.SearchOptions{
+	resp, err := srch.Query(search.SearchOptions{
 		Query:       "connect sync",
 		TokenBudget: 4000,
 		Limit:       50,
@@ -124,18 +124,18 @@ func TestSearchAdjacentMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search error: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected results, got 0")
 	}
 
 	// Log merge indicators for manual inspection
-	for i, r := range results {
+	for i, r := range resp.Results {
 		if i >= 5 {
 			break
 		}
 		t.Logf("result %d: path=%s section=%s tokens=%d score=%.4f", i, r.Path, r.SectionTitle, r.Tokens, r.Score)
 	}
-	t.Logf("total results returned: %d", len(results))
+	t.Logf("total results returned: %d", len(resp.Results))
 }
 
 func TestSearchNonexistentRepo(t *testing.T) {

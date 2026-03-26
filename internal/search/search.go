@@ -19,6 +19,16 @@ type SearchOptions struct {
 	RepoAlias   string // empty = all repos
 	Limit       int    // max raw results before filtering, default 20
 	TokenBudget int    // max total tokens in response, default 2000
+	Page        int    // 1-indexed, default 1
+	PageSize    int    // default 10, max 50
+}
+
+// SearchResponse holds paginated search results.
+type SearchResponse struct {
+	Results      []SearchResult
+	TotalResults int
+	Page         int
+	PageSize     int
 }
 
 // SearchResult holds a single processed search result.
@@ -42,8 +52,8 @@ func NewSearch(s *store.Store) *Search {
 }
 
 // Query runs the full search pipeline: FTS5 query, relevance filter,
-// adjacent chunk merging, and token budgeting.
-func (s *Search) Query(opts SearchOptions) ([]SearchResult, error) {
+// adjacent chunk merging, pagination, and token budgeting.
+func (s *Search) Query(opts SearchOptions) (*SearchResponse, error) {
 	if opts.Query == "" {
 		return nil, fmt.Errorf("search query must not be empty")
 	}
@@ -52,6 +62,18 @@ func (s *Search) Query(opts SearchOptions) ([]SearchResult, error) {
 	}
 	if opts.TokenBudget <= 0 {
 		opts.TokenBudget = 2000
+	}
+
+	page := opts.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := opts.PageSize
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 50 {
+		pageSize = 50
 	}
 
 	// 1. Resolve repo filter
@@ -73,7 +95,12 @@ func (s *Search) Query(opts SearchOptions) ([]SearchResult, error) {
 		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, nil
+		return &SearchResponse{
+			Results:      nil,
+			TotalResults: 0,
+			Page:         page,
+			PageSize:     pageSize,
+		}, nil
 	}
 
 	// Convert raw results to SearchResult
@@ -100,10 +127,32 @@ func (s *Search) Query(opts SearchOptions) ([]SearchResult, error) {
 	// 4. Merge adjacent chunks
 	results = mergeAdjacentChunks(results)
 
-	// 5. Apply token budget
+	// 5. Pagination
+	totalResults := len(results)
+	offset := (page - 1) * pageSize
+	if offset >= totalResults {
+		return &SearchResponse{
+			Results:      nil,
+			TotalResults: totalResults,
+			Page:         page,
+			PageSize:     pageSize,
+		}, nil
+	}
+	end := offset + pageSize
+	if end > totalResults {
+		end = totalResults
+	}
+	results = results[offset:end]
+
+	// 6. Apply token budget (to the page slice)
 	results = applyTokenBudget(results, opts.TokenBudget)
 
-	return results, nil
+	return &SearchResponse{
+		Results:      results,
+		TotalResults: totalResults,
+		Page:         page,
+		PageSize:     pageSize,
+	}, nil
 }
 
 // applyRelevanceFilter drops results below 50% of the top score.

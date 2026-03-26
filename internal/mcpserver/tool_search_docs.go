@@ -11,9 +11,11 @@ import (
 
 // SearchDocsInput defines the input schema for the search_docs tool.
 type SearchDocsInput struct {
-	Query  string `json:"query" jsonschema:"Search query. Supports FTS5 syntax: phrases in quotes, AND/OR/NOT operators, prefix* matching"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Filter results to a specific repo alias. Omit to search all repos."`
-	Tokens int    `json:"tokens,omitempty" jsonschema:"Maximum tokens in response. Default 2000."`
+	Query    string `json:"query" jsonschema:"Search query. Supports FTS5 syntax: phrases in quotes, AND/OR/NOT operators, prefix* matching"`
+	Repo     string `json:"repo,omitempty" jsonschema:"Filter results to a specific repo alias. Omit to search all repos."`
+	Tokens   int    `json:"tokens,omitempty" jsonschema:"Maximum tokens in response. Default 2000."`
+	Page     int    `json:"page,omitempty" jsonschema:"Page number (1-indexed). Default 1."`
+	PageSize int    `json:"page_size,omitempty" jsonschema:"Results per page. Default 10, max 50."`
 }
 
 // registerSearchDocsTool registers the search_docs tool on the MCP server.
@@ -31,10 +33,12 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		tokenBudget = 2000
 	}
 
-	results, err := s.search.Query(search.SearchOptions{
+	resp, err := s.search.Query(search.SearchOptions{
 		Query:       input.Query,
 		RepoAlias:   input.Repo,
 		TokenBudget: tokenBudget,
+		Page:        input.Page,
+		PageSize:    input.PageSize,
 	})
 	if err != nil {
 		errLower := strings.ToLower(err.Error())
@@ -50,13 +54,20 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		return nil, nil, err
 	}
 
-	if len(results) == 0 {
-		var text string
-		if input.Repo != "" {
-			text = fmt.Sprintf("No results for %q in alias %q. Try searching without a repo filter, or use list_repos to see available sources.", input.Query, input.Repo)
-		} else {
-			text = fmt.Sprintf("No results found for %q. Try different search terms or check available repos with list_repos.", input.Query)
+	if len(resp.Results) == 0 {
+		if resp.TotalResults == 0 {
+			var text string
+			if input.Repo != "" {
+				text = fmt.Sprintf("No results for %q in alias %q. Try searching without a repo filter, or use list_repos to see available sources.", input.Query, input.Repo)
+			} else {
+				text = fmt.Sprintf("No results found for %q. Try different search terms or check available repos with list_repos.", input.Query)
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: text}},
+			}, nil, nil
 		}
+		text := fmt.Sprintf("Page %d is beyond the %d total results. Try a lower page number.",
+			resp.Page, resp.TotalResults)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -64,20 +75,28 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 
 	// Count total tokens across results
 	var totalTokens int
-	for _, r := range results {
+	for _, r := range resp.Results {
 		totalTokens += r.Tokens
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d results (%d tokens)\n\n", len(results), totalTokens)
+	totalPages := (resp.TotalResults + resp.PageSize - 1) / resp.PageSize
 
-	for _, r := range results {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Found %d results on page %d of %d (%d total, %d tokens)\n\n",
+		len(resp.Results), resp.Page, totalPages, resp.TotalResults, totalTokens)
+
+	for _, r := range resp.Results {
 		title := r.SectionTitle
 		if title == "" {
 			title = r.DocTitle
 		}
 		fmt.Fprintf(&b, "## repo: %s | alias: %s | %s > %s\n%s\n\n---\n\n",
 			DisplayRepo(r.RepoURL, ""), r.RepoAlias, r.Path, title, r.Content)
+	}
+
+	if resp.Page < totalPages {
+		fmt.Fprintf(&b, "Page %d of %d (%d total results). Use page: %d to see more.\n",
+			resp.Page, totalPages, resp.TotalResults, resp.Page+1)
 	}
 
 	return &mcp.CallToolResult{

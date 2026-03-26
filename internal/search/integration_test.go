@@ -65,7 +65,7 @@ func TestIntegrationSearchPipeline(t *testing.T) {
 	srch := NewSearch(s)
 
 	// Search for kubernetes - should find results from both repos
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "kubernetes",
 		Limit:       20,
 		TokenBudget: 2000,
@@ -73,13 +73,13 @@ func TestIntegrationSearchPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search kubernetes: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected results for 'kubernetes'")
 	}
 
 	// Verify results come from both repos
 	repos := make(map[string]bool)
-	for _, r := range results {
+	for _, r := range resp.Results {
 		repos[r.RepoAlias] = true
 	}
 	if !repos["repo-a"] || !repos["repo-b"] {
@@ -94,7 +94,7 @@ func TestIntegrationSearchRepoFilter(t *testing.T) {
 	srch := NewSearch(s)
 
 	// Search with repo-b filter
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "kubernetes",
 		RepoAlias:   "repo-b",
 		Limit:       20,
@@ -103,7 +103,7 @@ func TestIntegrationSearchRepoFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	for _, r := range results {
+	for _, r := range resp.Results {
 		if r.RepoAlias != "repo-b" {
 			t.Errorf("expected only repo-b results, got %s", r.RepoAlias)
 		}
@@ -117,7 +117,7 @@ func TestIntegrationSearchTokenBudget(t *testing.T) {
 	srch := NewSearch(s)
 
 	// Search with very low token budget
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "kubernetes",
 		Limit:       20,
 		TokenBudget: 100,
@@ -128,13 +128,13 @@ func TestIntegrationSearchTokenBudget(t *testing.T) {
 
 	// Calculate total tokens
 	var total int
-	for _, r := range results {
+	for _, r := range resp.Results {
 		total += r.Tokens
 	}
 
 	// Total should be reasonable (within budget + last result that crossed)
-	if len(results) > 0 {
-		lastTokens := results[len(results)-1].Tokens
+	if len(resp.Results) > 0 {
+		lastTokens := resp.Results[len(resp.Results)-1].Tokens
 		if total-lastTokens > 100 {
 			t.Errorf("token budget not enforced: total %d (without last result's %d = %d, expected <= 100)",
 				total, lastTokens, total-lastTokens)
@@ -149,7 +149,7 @@ func TestIntegrationSearchAdjacentMerge(t *testing.T) {
 	srch := NewSearch(s)
 
 	// Search for "deployment" which appears in adjacent chunks in repo-a guide.md
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "deployment",
 		Limit:       20,
 		TokenBudget: 2000,
@@ -161,7 +161,7 @@ func TestIntegrationSearchAdjacentMerge(t *testing.T) {
 	// Check that if results from the same file exist, they may have been merged
 	// (we can't guarantee merging since it depends on whether adjacent chunks
 	// both matched, but we verify no errors occur)
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected results for 'deployment'")
 	}
 }
@@ -239,7 +239,7 @@ func TestIntegrationDeleteRepo(t *testing.T) {
 
 	// Verify search returns no repo-a results
 	srch := NewSearch(s)
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "kubernetes",
 		Limit:       20,
 		TokenBudget: 2000,
@@ -247,7 +247,7 @@ func TestIntegrationDeleteRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search after delete: %v", err)
 	}
-	for _, r := range results {
+	for _, r := range resp.Results {
 		if r.RepoAlias == "repo-a" {
 			t.Error("found repo-a result after deletion")
 		}
@@ -273,7 +273,7 @@ func TestIntegrationRelevanceFilter(t *testing.T) {
 	}
 
 	srch := NewSearch(s)
-	results, err := srch.Query(SearchOptions{
+	resp, err := srch.Query(SearchOptions{
 		Query:       "kubernetes",
 		Limit:       20,
 		TokenBudget: 2000,
@@ -283,10 +283,10 @@ func TestIntegrationRelevanceFilter(t *testing.T) {
 	}
 
 	// The highly relevant result should always be present
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected at least one result")
 	}
-	if results[0].Path != "a.md" {
-		t.Errorf("expected most relevant result from a.md, got %s", results[0].Path)
+	if resp.Results[0].Path != "a.md" {
+		t.Errorf("expected most relevant result from a.md, got %s", resp.Results[0].Path)
 	}
 }

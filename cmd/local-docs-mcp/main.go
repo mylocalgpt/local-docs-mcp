@@ -259,7 +259,7 @@ func runSearch() {
 	defer s.Close()
 
 	srch := search.NewSearch(s)
-	results, err := srch.Query(search.SearchOptions{
+	resp, err := srch.Query(search.SearchOptions{
 		Query:       query,
 		RepoAlias:   *repoAlias,
 		Limit:       *limit,
@@ -274,12 +274,12 @@ func runSearch() {
 		os.Exit(1)
 	}
 
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		fmt.Fprintf(os.Stderr, "No results found for '%s'\n", query)
 		return
 	}
 
-	printSearchResults(results)
+	printSearchResults(resp.Results)
 }
 
 func runList() {

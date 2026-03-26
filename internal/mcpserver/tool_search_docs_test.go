@@ -301,3 +301,61 @@ func TestSearchDocsWithTokenLimit(t *testing.T) {
 		t.Errorf("expected summary line, got: %s", text.Text[:min(100, len(text.Text))])
 	}
 }
+
+func TestSearchDocsPagination(t *testing.T) {
+	cs, _, cleanup := setupSearchTest(t)
+	defer cleanup()
+
+	// Page 1 with page_size=1
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "search_docs",
+		Arguments: map[string]any{
+			"query":     "go",
+			"page":      1,
+			"page_size": 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error")
+	}
+
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+
+	if !strings.Contains(text.Text, "page 1") {
+		t.Errorf("expected 'page 1' in output, got: %s", text.Text[:min(200, len(text.Text))])
+	}
+}
+
+func TestSearchDocsPaginationBeyondRange(t *testing.T) {
+	cs, _, cleanup := setupSearchTest(t)
+	defer cleanup()
+
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "search_docs",
+		Arguments: map[string]any{
+			"query": "install",
+			"page":  100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error")
+	}
+
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+
+	if !strings.Contains(text.Text, "beyond") {
+		t.Errorf("expected 'beyond' in message, got: %s", text.Text)
+	}
+}

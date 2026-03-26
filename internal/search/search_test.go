@@ -49,7 +49,7 @@ func TestSearchQuery(t *testing.T) {
 	})
 
 	search := NewSearch(s)
-	results, err := search.Query(SearchOptions{
+	resp, err := search.Query(SearchOptions{
 		Query:       "sync",
 		Limit:       20,
 		TokenBudget: 2000,
@@ -57,12 +57,12 @@ func TestSearchQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(results) == 0 {
+	if len(resp.Results) == 0 {
 		t.Fatal("expected results, got none")
 	}
 
 	// Results should be ranked; verify they come back
-	for _, r := range results {
+	for _, r := range resp.Results {
 		if r.RepoAlias != "test-repo" {
 			t.Errorf("expected repo alias test-repo, got %s", r.RepoAlias)
 		}
@@ -206,7 +206,7 @@ func TestRepoFilter(t *testing.T) {
 	search := NewSearch(s)
 
 	// Search with repo filter
-	results, err := search.Query(SearchOptions{
+	resp, err := search.Query(SearchOptions{
 		Query:       "kubernetes",
 		RepoAlias:   "repo-a",
 		Limit:       20,
@@ -215,7 +215,7 @@ func TestRepoFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	for _, r := range results {
+	for _, r := range resp.Results {
 		if r.RepoAlias != "repo-a" {
 			t.Errorf("expected only repo-a results, got %s", r.RepoAlias)
 		}
