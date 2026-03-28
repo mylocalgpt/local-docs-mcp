@@ -3,6 +3,13 @@ set -euo pipefail
 
 echo "Running pre-push checks..."
 
+if command -v golangci-lint &>/dev/null; then
+  echo "=> golangci-lint"
+  golangci-lint run ./...
+else
+  echo "=> golangci-lint (skipped: not installed)"
+fi
+
 echo "=> go vet"
 go vet ./...
 
