@@ -83,13 +83,13 @@ func TestIndexRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	repoCfg := config.RepoConfig{
 		URL:   repoDir,
@@ -194,13 +194,13 @@ func TestIndexAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	cfg := &config.Config{
 		Repos: []config.RepoConfig{
@@ -271,13 +271,13 @@ func TestIndexLocalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	result, err := ix.IndexLocalPath("local-docs", dir)
 	if err != nil {
@@ -319,13 +319,13 @@ func TestIndexLocalPathReindexReplaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	// First index
 	r1, err := ix.IndexLocalPath("local-docs", dir)
@@ -361,13 +361,13 @@ func TestIndexLocalPathNonExistentDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	_, err = ix.IndexLocalPath("bad", "/nonexistent/path/that/does/not/exist")
 	if err == nil {
@@ -385,13 +385,13 @@ func TestIndexLocalPathFileNotDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := NewIndexer(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	_, err = ix.IndexLocalPath("bad", tmpFile)
 	if err == nil {

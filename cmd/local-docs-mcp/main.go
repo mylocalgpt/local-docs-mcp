@@ -83,7 +83,7 @@ func runServe() {
 	}
 
 	s := openStoreOrDie(db, false)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := search.NewSearch(s)
 
@@ -92,7 +92,7 @@ func runServe() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	srv := mcpserver.New(s, srch, ix, cfg)
 
@@ -187,14 +187,14 @@ func runIndex() {
 	}
 
 	s := openStoreOrDie(db, false)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	var results []indexer.IndexResult
 	var indexErr error
@@ -256,7 +256,7 @@ func runSearch() {
 	}
 
 	s := openStoreOrDie(db, true)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := search.NewSearch(s)
 	resp, err := srch.Query(search.SearchOptions{
@@ -297,7 +297,7 @@ func runList() {
 	}
 
 	s := openStoreOrDie(db, true)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repos, err := s.ListRepos()
 	if err != nil {
@@ -353,14 +353,14 @@ func runUpdate() {
 	}
 
 	s := openStoreOrDie(db, false)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	aliasArg := ""
 	if len(fs.Args()) > 0 {
@@ -499,7 +499,7 @@ func runRemove() {
 	}
 
 	s := openStoreOrDie(db, true)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	count, err := s.DeleteRepo(alias)
 	if err != nil {
@@ -531,7 +531,7 @@ func runBrowse() {
 	}
 
 	s := openStoreOrDie(db, true)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repo, err := s.GetRepo(alias)
 	if err != nil {

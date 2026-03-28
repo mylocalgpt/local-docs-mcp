@@ -114,16 +114,16 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		result, err := s.indexer.IndexRepo(cfg, true)
 		if err != nil {
 			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
-			s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
+			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
 			return
 		}
 		if result.Error != nil {
 			log.Printf("add_docs: %s indexing error: %v", input.Alias, result.Error)
-			s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
+			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
 			return
 		}
 
-		s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
+		_ = s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
 		if err := s.store.RebuildFTS(); err != nil {
 			log.Printf("add_docs: rebuild fts failed: %v", err)
 		}
@@ -179,16 +179,16 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 		result, err := s.indexer.IndexLocalPath(input.Alias, input.Path)
 		if err != nil {
 			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
-			s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
+			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
 			return
 		}
 		if result.Error != nil {
 			log.Printf("add_docs: %s indexing error: %v", input.Alias, result.Error)
-			s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
+			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
 			return
 		}
 
-		s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
+		_ = s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
 		if err := s.store.RebuildFTS(); err != nil {
 			log.Printf("add_docs: rebuild fts failed: %v", err)
 		}

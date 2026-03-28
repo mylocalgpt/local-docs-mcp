@@ -39,7 +39,7 @@ func insertTestDocs(t *testing.T, s *store.Store, repoID int64, docs []store.Doc
 
 func TestSearchQuery(t *testing.T) {
 	s := setupTestStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repoID := insertTestRepo(t, s, "test-repo", "https://example.com/test-repo")
 	insertTestDocs(t, s, repoID, []store.Document{
@@ -191,7 +191,7 @@ func TestMergeNonAdjacentChunks(t *testing.T) {
 
 func TestRepoFilter(t *testing.T) {
 	s := setupTestStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repoA := insertTestRepo(t, s, "repo-a", "https://example.com/a")
 	repoB := insertTestRepo(t, s, "repo-b", "https://example.com/b")
@@ -224,7 +224,7 @@ func TestRepoFilter(t *testing.T) {
 
 func TestEmptyQuery(t *testing.T) {
 	s := setupTestStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	search := NewSearch(s)
 	_, err := search.Query(SearchOptions{Query: ""})

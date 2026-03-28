@@ -52,15 +52,15 @@ func setupIntegrationStore(t *testing.T) (*store.Store, int64, int64) {
 	}
 
 	// Update doc counts
-	s.UpdateRepoIndex(repoA, "aaa1111", "2026-03-24T10:00:00Z", len(docsA))
-	s.UpdateRepoIndex(repoB, "bbb2222", "2026-03-24T10:01:00Z", len(docsB))
+	_ = s.UpdateRepoIndex(repoA, "aaa1111", "2026-03-24T10:00:00Z", len(docsA))
+	_ = s.UpdateRepoIndex(repoB, "bbb2222", "2026-03-24T10:01:00Z", len(docsB))
 
 	return s, repoA, repoB
 }
 
 func TestIntegrationSearchPipeline(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := NewSearch(s)
 
@@ -89,7 +89,7 @@ func TestIntegrationSearchPipeline(t *testing.T) {
 
 func TestIntegrationSearchRepoFilter(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := NewSearch(s)
 
@@ -112,7 +112,7 @@ func TestIntegrationSearchRepoFilter(t *testing.T) {
 
 func TestIntegrationSearchTokenBudget(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := NewSearch(s)
 
@@ -144,7 +144,7 @@ func TestIntegrationSearchTokenBudget(t *testing.T) {
 
 func TestIntegrationSearchAdjacentMerge(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := NewSearch(s)
 
@@ -168,7 +168,7 @@ func TestIntegrationSearchAdjacentMerge(t *testing.T) {
 
 func TestIntegrationListRepos(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repos, err := s.ListRepos()
 	if err != nil {
@@ -191,7 +191,7 @@ func TestIntegrationListRepos(t *testing.T) {
 
 func TestIntegrationBrowse(t *testing.T) {
 	s, repoA, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	// Browse files
 	files, _, err := s.BrowseFiles(repoA, 1, 1000)
@@ -217,7 +217,7 @@ func TestIntegrationBrowse(t *testing.T) {
 
 func TestIntegrationDeleteRepo(t *testing.T) {
 	s, _, _ := setupIntegrationStore(t)
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	// Delete repo-a
 	count, err := s.DeleteRepo("repo-a")
@@ -259,7 +259,7 @@ func TestIntegrationRelevanceFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	repoID, _ := s.UpsertRepo("test", "https://example.com/test", `["docs"]`, "git")
 

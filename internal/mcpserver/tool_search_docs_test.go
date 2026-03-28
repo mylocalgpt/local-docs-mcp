@@ -75,7 +75,7 @@ func setupSearchTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession, func
 	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -87,15 +87,15 @@ func setupSearchTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession, func
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		clientSession.Close()
-		serverSession.Wait()
+		_ = clientSession.Close()
+		_ = serverSession.Wait()
 		cancel()
-		s.Close()
+		_ = s.Close()
 	}
 
 	return clientSession, serverSession, cleanup

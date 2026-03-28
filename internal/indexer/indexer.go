@@ -45,7 +45,7 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 	result := &IndexResult{Repo: cfg.Alias}
 
 	repoDir := filepath.Join(ix.tempBase, cfg.Alias)
-	defer os.RemoveAll(repoDir)
+	defer os.RemoveAll(repoDir) //nolint:errcheck
 
 	// 1. Clone without checkout
 	if err := CloneNoCheckout(cfg.URL, repoDir); err != nil {

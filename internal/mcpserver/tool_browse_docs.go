@@ -31,7 +31,7 @@ func (s *Server) handleBrowseDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		return nil, nil, err
 	}
 	if repo == nil {
-		return nil, nil, fmt.Errorf("Repo %q not found. Use list_repos to see available repos.", input.Repo)
+		return nil, nil, fmt.Errorf("repo %q not found, use list_repos to see available repos", input.Repo)
 	}
 
 	if input.Path == "" {

@@ -48,13 +48,13 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("set pragma %q: %w", p, err)
 		}
 	}
 
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func NewStore(dbPath string) (*Store, error) {
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {
 			if !strings.Contains(err.Error(), "duplicate column name") {
-				db.Close()
+				_ = db.Close()
 				return nil, fmt.Errorf("migration %q: %w", m, err)
 			}
 		}
@@ -102,17 +102,17 @@ func NewStore(dbPath string) (*Store, error) {
 			ALTER TABLE documents_new RENAME TO documents;
 		`
 		if _, err := db.Exec(migrationSQL); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("migrate documents table: %w", err)
 		}
 		// Recreate FTS virtual table and triggers after table recreation
 		if _, err := db.Exec(schema); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("recreate fts: %w", err)
 		}
 		// Rebuild FTS index from existing data
 		if _, err := db.Exec("INSERT INTO docs_fts(docs_fts) VALUES('rebuild')"); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("rebuild fts after migration: %w", err)
 		}
 	}
@@ -231,7 +231,7 @@ func (s *Store) ReplaceDocuments(repoID int64, docs []Document) error {
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
 	}
-	defer stmt.Close()
+	defer stmt.Close() //nolint:errcheck
 
 	type dedupKey struct{ path, content string }
 	seen := make(map[dedupKey]bool, len(docs))
@@ -297,7 +297,7 @@ func (s *Store) SearchFTS(query string, repoID *int64, limit int) ([]RawSearchRe
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var results []RawSearchResult
 	for rows.Next() {
@@ -324,7 +324,7 @@ func (s *Store) ListRepos() ([]Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list repos: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var repos []Repo
 	for rows.Next() {
@@ -391,7 +391,7 @@ func (s *Store) BrowseFiles(repoID int64, page, pageSize int) ([]FileInfo, int, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("browse files: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var files []FileInfo
 	for rows.Next() {
@@ -413,7 +413,7 @@ func (s *Store) BrowseHeadings(repoID int64, path string) ([]HeadingInfo, error)
 	if err != nil {
 		return nil, fmt.Errorf("browse headings: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var headings []HeadingInfo
 	for rows.Next() {

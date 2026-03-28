@@ -29,7 +29,7 @@ func setupRemoveDocsTest(t *testing.T) (*mcp.ClientSession, *store.Store, func()
 	_, err = srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -37,11 +37,11 @@ func setupRemoveDocsTest(t *testing.T) (*mcp.ClientSession, *store.Store, func()
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
-	return cs, s, func() { cancel(); s.Close() }
+	return cs, s, func() { cancel(); _ = s.Close() }
 }
 
 func TestRemoveDocsSuccess(t *testing.T) {
@@ -53,7 +53,7 @@ func TestRemoveDocsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.ReplaceDocuments(repoID, []store.Document{
+	_ = s.ReplaceDocuments(repoID, []store.Document{
 		{RepoID: repoID, Path: "a.md", DocTitle: "A", SectionTitle: "A1", Content: "content", Tokens: 10, HeadingLevel: 1},
 	})
 

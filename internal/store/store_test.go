@@ -10,7 +10,7 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -223,8 +223,8 @@ func TestListRepos(t *testing.T) {
 	}
 
 	// Insert two repos
-	s.UpsertRepo("bravo", "https://example.com/b", `["docs"]`, "git")
-	s.UpsertRepo("alpha", "https://example.com/a", `["docs"]`, "git")
+	_, _ = s.UpsertRepo("bravo", "https://example.com/b", `["docs"]`, "git")
+	_, _ = s.UpsertRepo("alpha", "https://example.com/a", `["docs"]`, "git")
 
 	repos, err = s.ListRepos()
 	if err != nil {
@@ -243,7 +243,7 @@ func TestDeleteRepo(t *testing.T) {
 	s := newTestStore(t)
 
 	repoID, _ := s.UpsertRepo("deleteme", "https://example.com/del", `["docs"]`, "git")
-	s.ReplaceDocuments(repoID, []Document{
+	_ = s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "a.md", DocTitle: "A", SectionTitle: "A1", Content: "content one", Tokens: 10, HeadingLevel: 1},
 		{RepoID: repoID, Path: "b.md", DocTitle: "B", SectionTitle: "B1", Content: "content two", Tokens: 20, HeadingLevel: 1},
 	})
@@ -276,7 +276,7 @@ func TestBrowseFiles(t *testing.T) {
 	s := newTestStore(t)
 
 	repoID, _ := s.UpsertRepo("browse-repo", "https://example.com/br", `["docs"]`, "git")
-	s.ReplaceDocuments(repoID, []Document{
+	_ = s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Intro", Content: "intro", Tokens: 10, HeadingLevel: 1},
 		{RepoID: repoID, Path: "docs/guide.md", DocTitle: "Guide", SectionTitle: "Setup", Content: "setup", Tokens: 20, HeadingLevel: 2},
 		{RepoID: repoID, Path: "docs/api.md", DocTitle: "API", SectionTitle: "Overview", Content: "overview", Tokens: 15, HeadingLevel: 1},
@@ -305,7 +305,7 @@ func TestBrowseHeadings(t *testing.T) {
 	s := newTestStore(t)
 
 	repoID, _ := s.UpsertRepo("heading-repo", "https://example.com/hr", `["docs"]`, "git")
-	s.ReplaceDocuments(repoID, []Document{
+	_ = s.ReplaceDocuments(repoID, []Document{
 		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Getting Started", Content: "intro", Tokens: 100, HeadingLevel: 2},
 		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Installation", Content: "install", Tokens: 50, HeadingLevel: 3},
 		{RepoID: repoID, Path: "guide.md", DocTitle: "Guide", SectionTitle: "Quick Start", Content: "quick", Tokens: 75, HeadingLevel: 3},
@@ -374,7 +374,7 @@ func TestDBPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	if s.DBPath() != ":memory:" {
 		t.Errorf("DBPath mismatch: got %q, want %q", s.DBPath(), ":memory:")
@@ -388,7 +388,7 @@ func TestMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore first: %v", err)
 	}
-	s1.Close()
+	_ = s1.Close()
 
 	// Since :memory: is ephemeral, use a temp file to test real reopening.
 	tmpDir := t.TempDir()
@@ -398,14 +398,14 @@ func TestMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore create: %v", err)
 	}
-	s2.Close()
+	_ = s2.Close()
 
 	// Reopen - migration should run again without error.
 	s3, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewStore reopen: %v", err)
 	}
-	defer s3.Close()
+	defer s3.Close() //nolint:errcheck
 
 	// Verify columns work after reopening.
 	id, err := s3.UpsertRepo("test", "https://example.com", `["docs"]`, "git")

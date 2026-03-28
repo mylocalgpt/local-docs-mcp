@@ -184,7 +184,6 @@ func SplitByHeadings(content, filePath string) []Chunk {
 					level: len(m[1]),
 					lines: []string{line},
 				})
-				current = &sections[len(sections)-1]
 				continue
 			}
 		}

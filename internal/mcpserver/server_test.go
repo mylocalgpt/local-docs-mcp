@@ -15,7 +15,7 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := search.NewSearch(s)
 	cfg := &config.Config{Repos: []config.RepoConfig{
@@ -36,7 +36,7 @@ func TestServerInitialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srch := search.NewSearch(s)
 	cfg := &config.Config{Repos: []config.RepoConfig{

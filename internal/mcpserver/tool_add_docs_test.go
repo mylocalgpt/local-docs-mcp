@@ -29,7 +29,7 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("create indexer: %v", err)
 	}
 
@@ -43,8 +43,8 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	_, err = srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		_ = ix.Cleanup()
+		_ = s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -56,15 +56,15 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		_ = ix.Cleanup()
+		_ = s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		_ = ix.Cleanup()
+		_ = s.Close()
 	}
 
 	return clientSession, srv, cleanup
@@ -158,6 +158,7 @@ func TestAddDocsLocalSource(t *testing.T) {
 	waitDone := make(chan struct{})
 	go func() {
 		srv.indexMu.Lock()
+		//nolint:staticcheck // SA2001: intentional empty critical section to detect lock release
 		srv.indexMu.Unlock()
 		close(waitDone)
 	}()

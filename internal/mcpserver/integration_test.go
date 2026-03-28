@@ -102,9 +102,9 @@ func setupIntegrationTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession,
 
 	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
-		ix.Cleanup()
+		_ = ix.Cleanup()
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -115,18 +115,18 @@ func setupIntegrationTest(t *testing.T) (*mcp.ClientSession, *mcp.ServerSession,
 
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
-		ix.Cleanup()
+		_ = ix.Cleanup()
 		cancel()
-		s.Close()
+		_ = s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		clientSession.Close()
-		serverSession.Wait()
+		_ = clientSession.Close()
+		_ = serverSession.Wait()
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		_ = ix.Cleanup()
+		_ = s.Close()
 	}
 
 	return clientSession, serverSession, cleanup

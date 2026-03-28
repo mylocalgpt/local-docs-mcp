@@ -16,7 +16,7 @@ Add to your MCP client:
   "mcpServers": {
     "local-docs": {
       "command": "npx",
-      "args": ["-y", "local-docs-mcp", "stdio"]
+      "args": ["-y", "local-docs-mcp@latest", "stdio"]
     }
   }
 }
@@ -28,7 +28,7 @@ Add to your MCP client:
   "servers": {
     "local-docs": {
       "command": "npx",
-      "args": ["-y", "local-docs-mcp", "stdio"]
+      "args": ["-y", "local-docs-mcp@latest", "stdio"]
     }
   }
 }
