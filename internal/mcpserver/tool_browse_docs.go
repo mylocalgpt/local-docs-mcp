@@ -10,10 +10,10 @@ import (
 
 // BrowseDocsInput defines the input schema for the browse_docs tool.
 type BrowseDocsInput struct {
-	Repo     string `json:"repo" jsonschema:"Repo alias to browse. Use list_repos to see available repos."`
-	Path     string `json:"path,omitempty" jsonschema:"File path to drill into. Omit to list all doc files in the repo."`
-	Page     int    `json:"page,omitempty" jsonschema:"Page number (1-indexed). Default 1. Only applies to file listing mode."`
-	PageSize int    `json:"page_size,omitempty" jsonschema:"Files per page. Default 30, max 100. Only applies to file listing mode."`
+	Repo     string  `json:"repo" jsonschema:"Repo alias to browse. Use list_repos to see available repos."`
+	Path     *string `json:"path,omitempty" jsonschema:"File path to drill into. Omit to list all doc files in the repo."`
+	Page     *int    `json:"page,omitempty" jsonschema:"Page number (1-indexed). Default 1. Only applies to file listing mode."`
+	PageSize *int    `json:"page_size,omitempty" jsonschema:"Files per page. Default 30, max 100. Only applies to file listing mode."`
 }
 
 // registerBrowseDocsTool registers the browse_docs tool on the MCP server.
@@ -34,10 +34,18 @@ func (s *Server) handleBrowseDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 		return nil, nil, fmt.Errorf("repo %q not found, use list_repos to see available repos", input.Repo)
 	}
 
-	if input.Path == "" {
-		return s.browseFiles(repo.ID, repo.Alias, repo.URL, repo.SourceType, input.Page, input.PageSize)
+	if input.Path == nil || *input.Path == "" {
+		page := 1
+		if input.Page != nil {
+			page = *input.Page
+		}
+		pageSize := 30
+		if input.PageSize != nil {
+			pageSize = *input.PageSize
+		}
+		return s.browseFiles(repo.ID, repo.Alias, repo.URL, repo.SourceType, page, pageSize)
 	}
-	return s.browseHeadings(repo.ID, repo.Alias, repo.URL, repo.SourceType, input.Path)
+	return s.browseHeadings(repo.ID, repo.Alias, repo.URL, repo.SourceType, *input.Path)
 }
 
 // browseFiles lists files in a repo with their section counts, with pagination.

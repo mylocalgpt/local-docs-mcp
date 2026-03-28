@@ -15,7 +15,7 @@ import (
 
 // UpdateDocsInput defines the input schema for the update_docs tool.
 type UpdateDocsInput struct {
-	Repo string `json:"repo,omitempty" jsonschema:"Specific repo alias to update. Omit to update all repos."`
+	Repo *string `json:"repo,omitempty" jsonschema:"Specific repo alias to update. Omit to update all repos."`
 }
 
 // registerUpdateDocsTool registers the update_docs tool on the MCP server.
@@ -41,8 +41,8 @@ func (s *Server) handleUpdateDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 	}
 	defer s.indexMu.Unlock()
 
-	if input.Repo != "" {
-		return s.updateSingleRepo(input.Repo)
+	if input.Repo != nil && *input.Repo != "" {
+		return s.updateSingleRepo(*input.Repo)
 	}
 	return s.updateAllRepos()
 }

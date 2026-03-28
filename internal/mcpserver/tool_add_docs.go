@@ -16,9 +16,9 @@ import (
 
 // AddDocsInput defines the input schema for the add_docs tool.
 type AddDocsInput struct {
-	URL   string   `json:"url,omitempty" jsonschema:"GitHub repository URL"`
+	URL   *string  `json:"url,omitempty" jsonschema:"GitHub repository URL"`
 	Paths []string `json:"paths,omitempty" jsonschema:"Subdirectory paths within the repo"`
-	Path  string   `json:"path,omitempty" jsonschema:"Local filesystem directory path"`
+	Path  *string  `json:"path,omitempty" jsonschema:"Local filesystem directory path"`
 	Alias string   `json:"alias" jsonschema:"Unique name for this doc source"`
 }
 
@@ -42,8 +42,8 @@ func (s *Server) handleAddDocs(_ context.Context, _ *mcp.CallToolRequest, input 
 	}
 
 	// Validate: must provide url xor path
-	hasURL := input.URL != ""
-	hasPath := input.Path != ""
+	hasURL := input.URL != nil && *input.URL != ""
+	hasPath := input.Path != nil && *input.Path != ""
 	if hasURL == hasPath {
 		return nil, nil, fmt.Errorf("provide either 'url' (git repo) or 'path' (local directory), not both or neither")
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		return nil, nil, fmt.Errorf("marshal paths: %w", err)
 	}
 
-	repoID, err := s.store.UpsertRepo(input.Alias, input.URL, string(pathsJSON), "git")
+	repoID, err := s.store.UpsertRepo(input.Alias, *input.URL, string(pathsJSON), "git")
 	if err != nil {
 		return nil, nil, fmt.Errorf("upsert repo: %w", err)
 	}
@@ -110,7 +110,7 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 	go func() {
 		defer s.indexMu.Unlock()
 
-		cfg := config.RepoConfig{Alias: input.Alias, URL: input.URL, Paths: mergedPaths}
+		cfg := config.RepoConfig{Alias: input.Alias, URL: *input.URL, Paths: mergedPaths}
 		result, err := s.indexer.IndexRepo(cfg, true)
 		if err != nil {
 			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
@@ -133,7 +133,7 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 	var b strings.Builder
 	fmt.Fprintf(&b, "Adding git documentation source:\n")
 	fmt.Fprintf(&b, "  Alias: %s\n", input.Alias)
-	fmt.Fprintf(&b, "  URL: %s\n", input.URL)
+	fmt.Fprintf(&b, "  URL: %s\n", *input.URL)
 	fmt.Fprintf(&b, "  Paths: %s\n", strings.Join(mergedPaths, ", "))
 	fmt.Fprintf(&b, "\nIndexing started in the background. Use list_repos to check progress.")
 
@@ -144,15 +144,15 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 
 // handleAddLocalDocs handles adding documentation from a local directory.
 func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, any, error) {
-	info, err := os.Stat(input.Path)
+	info, err := os.Stat(*input.Path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("path %q: %w", input.Path, err)
+		return nil, nil, fmt.Errorf("path %q: %w", *input.Path, err)
 	}
 	if !info.IsDir() {
-		return nil, nil, fmt.Errorf("path %q is not a directory", input.Path)
+		return nil, nil, fmt.Errorf("path %q is not a directory", *input.Path)
 	}
 
-	repoID, err := s.store.UpsertRepo(input.Alias, input.Path, "[]", "local")
+	repoID, err := s.store.UpsertRepo(input.Alias, *input.Path, "[]", "local")
 	if err != nil {
 		return nil, nil, fmt.Errorf("upsert repo: %w", err)
 	}
@@ -176,7 +176,7 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 	go func() {
 		defer s.indexMu.Unlock()
 
-		result, err := s.indexer.IndexLocalPath(input.Alias, input.Path)
+		result, err := s.indexer.IndexLocalPath(input.Alias, *input.Path)
 		if err != nil {
 			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
 			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
@@ -198,7 +198,7 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 	var b strings.Builder
 	fmt.Fprintf(&b, "Adding local documentation source:\n")
 	fmt.Fprintf(&b, "  Alias: %s\n", input.Alias)
-	fmt.Fprintf(&b, "  Path: %s\n", input.Path)
+	fmt.Fprintf(&b, "  Path: %s\n", *input.Path)
 	fmt.Fprintf(&b, "\nIndexing started in the background. Use list_repos to check progress.")
 
 	return &mcp.CallToolResult{
