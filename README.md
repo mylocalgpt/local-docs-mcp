@@ -1,5 +1,11 @@
 # local-docs-mcp
 
+[![CI](https://github.com/mylocalgpt/local-docs-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mylocalgpt/local-docs-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/local-docs-mcp.svg)](https://www.npmjs.com/package/local-docs-mcp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/mylocalgpt/local-docs-mcp)](https://goreportcard.com/report/github.com/mylocalgpt/local-docs-mcp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mylocalgpt/local-docs-mcp.svg)](https://pkg.go.dev/github.com/mylocalgpt/local-docs-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/mylocalgpt/local-docs-mcp/blob/main/LICENSE)
+
 Local documentation search for AI assistants, from Git repos and local directories
 
 ## What It Does
