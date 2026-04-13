@@ -40,6 +40,30 @@ Add to your MCP client:
 }
 ```
 
+### Alternative Install
+
+**Go install:**
+```
+go install github.com/mylocalgpt/local-docs-mcp/cmd/local-docs-mcp@latest
+```
+
+Then use `local-docs-mcp` as the command in your MCP config instead of `npx`.
+
+**Binary download:** grab the latest release from [GitHub Releases](https://github.com/mylocalgpt/local-docs-mcp/releases) and point your MCP config at the binary path:
+
+```json
+{
+  "mcpServers": {
+    "local-docs": {
+      "command": "/usr/local/bin/local-docs-mcp",
+      "args": ["stdio"]
+    }
+  }
+}
+```
+
+For full CLI usage, see [CLI reference](docs/cli.md).
+
 ### Example
 
 The AI assistant discovers and indexes documentation on the fly. For example:

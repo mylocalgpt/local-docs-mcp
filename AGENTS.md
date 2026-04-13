@@ -38,3 +38,4 @@ go vet ./...
 - MCP tools registered in `internal/mcpserver/tool_*.go` files
 - Database schema managed in `internal/store/schema.go`
 - CLI uses Go's `flag` package with manual subcommand dispatch, not cobra
+- **Do not manually bump versions.** Versioning is handled automatically by CI/CD
