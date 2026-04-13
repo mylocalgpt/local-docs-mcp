@@ -40,7 +40,8 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm install -g npm@latest
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@11.11.0 && npm install -g npm@latest
       - run: |
           cp README.md npm/README.md
           cd npm
