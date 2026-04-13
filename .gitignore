@@ -16,3 +16,5 @@ dist/
 npm/bin/*
 !npm/bin/cli.js
 npm/node_modules/
+npm/@local-docs-mcp/*/local-docs-mcp
+npm/@local-docs-mcp/*/local-docs-mcp.exe

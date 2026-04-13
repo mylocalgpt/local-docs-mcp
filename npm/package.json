@@ -3,9 +3,15 @@
   "version": "0.0.1",
   "description": "Local documentation search for AI assistants, from Git repos and local directories",
   "bin": { "local-docs-mcp": "./bin/cli.js" },
-  "scripts": { "postinstall": "node install.js" },
   "os": ["darwin", "linux", "win32"],
   "cpu": ["x64", "arm64"],
+  "optionalDependencies": {
+    "@local-docs-mcp/darwin-x64": "0.0.0",
+    "@local-docs-mcp/darwin-arm64": "0.0.0",
+    "@local-docs-mcp/linux-x64": "0.0.0",
+    "@local-docs-mcp/linux-arm64": "0.0.0",
+    "@local-docs-mcp/win32-x64": "0.0.0"
+  },
   "keywords": ["mcp", "documentation", "sqlite", "fts5"],
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/mylocalgpt/local-docs-mcp" }
