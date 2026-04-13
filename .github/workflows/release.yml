@@ -60,8 +60,6 @@ jobs:
           tar xzf dist/local-docs-mcp_linux_arm64.tar.gz -C npm/@local-docs-mcp/linux-arm64/ local-docs-mcp
           unzip -j dist/local-docs-mcp_windows_amd64.zip local-docs-mcp.exe -d npm/@local-docs-mcp/win32-x64/
       - name: Set versions and publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION=${GITHUB_REF_NAME#v}
 
