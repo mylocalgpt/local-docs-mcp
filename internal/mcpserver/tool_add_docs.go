@@ -16,7 +16,7 @@ import (
 
 // AddDocsInput defines the input schema for the add_docs tool.
 type AddDocsInput struct {
-	URL   *string  `json:"url,omitempty" jsonschema:"GitHub repository URL"`
+	URL   *string  `json:"url,omitempty" jsonschema:"Git repository URL"`
 	Paths []string `json:"paths,omitempty" jsonschema:"Subdirectory paths within the repo"`
 	Path  *string  `json:"path,omitempty" jsonschema:"Local filesystem directory path"`
 	Alias string   `json:"alias" jsonschema:"Unique name for this doc source"`
@@ -26,7 +26,7 @@ type AddDocsInput struct {
 func (s *Server) registerAddDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "add_docs",
-		Description: "Add documentation from a git repo or local directory. For git repos, provide the GitHub URL and specific doc subdirectory paths (e.g. [\"docs/guide/\"]). For local directories, provide the absolute filesystem path (ask the user if unknown). Indexing runs in the background; use list_repos to check status.",
+		Description: "Add documentation from a git repo or local directory. For git repos, provide the git repo URL and specific doc subdirectory paths (e.g. [\"docs/guide/\"]). For local directories, provide the absolute filesystem path (ask the user if unknown). Indexing runs in the background; use list_repos to check status.",
 	}, s.handleAddDocs)
 }
 
