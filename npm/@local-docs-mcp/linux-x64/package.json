@@ -1,0 +1,10 @@
+{
+  "name": "@local-docs-mcp/linux-x64",
+  "version": "0.0.0",
+  "description": "The Linux x64 binary for local-docs-mcp",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/mylocalgpt/local-docs-mcp.git" },
+  "preferUnplugged": true
+}

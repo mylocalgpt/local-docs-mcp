@@ -1,0 +1,10 @@
+{
+  "name": "@local-docs-mcp/darwin-arm64",
+  "version": "0.0.0",
+  "description": "The macOS ARM64 binary for local-docs-mcp",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/mylocalgpt/local-docs-mcp.git" },
+  "preferUnplugged": true
+}
