@@ -15,6 +15,9 @@ func MergePaths(existing, new []string) []string {
 
 	for _, p := range append(existing, new...) {
 		p = filepath.Clean(p)
+		// Normalize to forward slashes for consistent prefix comparison
+		// across platforms (filepath.Clean uses OS separators).
+		p = filepath.ToSlash(p)
 		// Normalize directories with trailing slash for prefix comparison,
 		// but not file paths (last segment contains a dot).
 		if !isFilePath(p) && !strings.HasSuffix(p, "/") {
