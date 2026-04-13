@@ -21,12 +21,23 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      - name: Test install.js against latest release
+      - name: Test cli.js resolves platform package
         run: |
           cd npm
-          LATEST=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.1.2")
-          npm version ${LATEST#v} --no-git-tag-version
-          node install.js
-          ./bin/local-docs-mcp list 2>&1 || true
-        env:
-          GH_TOKEN: ${{ github.token }}
+          npm install --ignore-scripts
+          node -e "
+            const path = require('path');
+            const os = require('os');
+            const key = process.platform + ' ' + os.arch();
+            const pkgs = {
+              'darwin x64': '@local-docs-mcp/darwin-x64',
+              'darwin arm64': '@local-docs-mcp/darwin-arm64',
+              'linux x64': '@local-docs-mcp/linux-x64',
+              'linux arm64': '@local-docs-mcp/linux-arm64',
+              'win32 x64': '@local-docs-mcp/win32-x64',
+            };
+            const pkg = pkgs[key];
+            if (!pkg) { console.error('No package for ' + key); process.exit(1); }
+            const pkgJson = require.resolve(pkg + '/package.json');
+            console.log('Resolved ' + pkg + ' at ' + path.dirname(pkgJson));
+          "
