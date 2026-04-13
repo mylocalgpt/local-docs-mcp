@@ -28,6 +28,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload goreleaser artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+          retention-days: 1
   publish-npm:
     needs: release
     runs-on: ubuntu-latest
@@ -42,9 +48,40 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@11.11.0 && npm install -g npm@latest
-      - run: |
+      - uses: actions/download-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+      - name: Extract binaries into platform packages
+        run: |
+          tar xzf dist/local-docs-mcp_darwin_amd64.tar.gz -C npm/@local-docs-mcp/darwin-x64/ local-docs-mcp
+          tar xzf dist/local-docs-mcp_darwin_arm64.tar.gz -C npm/@local-docs-mcp/darwin-arm64/ local-docs-mcp
+          tar xzf dist/local-docs-mcp_linux_amd64.tar.gz -C npm/@local-docs-mcp/linux-x64/ local-docs-mcp
+          tar xzf dist/local-docs-mcp_linux_arm64.tar.gz -C npm/@local-docs-mcp/linux-arm64/ local-docs-mcp
+          unzip -j dist/local-docs-mcp_windows_amd64.zip local-docs-mcp.exe -d npm/@local-docs-mcp/win32-x64/
+      - name: Set versions and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+
+          # Set version in all platform packages and publish them first
+          for dir in npm/@local-docs-mcp/*/; do
+            (cd "$dir" && npm version "$VERSION" --no-git-tag-version && npm publish --provenance --access public)
+          done
+
+          # Update optionalDependencies versions in main package
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('npm/package.json', 'utf8'));
+            for (const dep of Object.keys(pkg.optionalDependencies)) {
+              pkg.optionalDependencies[dep] = '$VERSION';
+            }
+            fs.writeFileSync('npm/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          # Copy README and publish main package
           cp README.md npm/README.md
           cd npm
-          VERSION=${GITHUB_REF_NAME#v}
-          npm version $VERSION --no-git-tag-version
+          npm version "$VERSION" --no-git-tag-version
           npm publish --provenance --access public
