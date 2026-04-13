@@ -97,9 +97,9 @@ async function main() {
 
   try {
     if (platform === 'win32') {
-      execSync(`tar -xf "${archivePath}" -C "${binDir}"`, { stdio: 'inherit' });
+      execSync(`tar -xf "${path.basename(archivePath)}"`, { stdio: 'inherit', cwd: binDir });
     } else {
-      execSync(`tar xzf "${archivePath}" -C "${binDir}"`, { stdio: 'inherit' });
+      execSync(`tar xzf "${path.basename(archivePath)}"`, { stdio: 'inherit', cwd: binDir });
     }
   } catch (err) {
     console.error(`Failed to extract archive: ${err.message}`);
