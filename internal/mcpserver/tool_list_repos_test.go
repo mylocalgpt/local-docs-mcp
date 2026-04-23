@@ -209,6 +209,66 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
+func TestFormatRepoStatusQueued(t *testing.T) {
+	tests := []struct {
+		name string
+		repo store.Repo
+		want string
+	}{
+		{
+			name: "queued with position hint",
+			repo: store.Repo{Status: store.StatusQueued, StatusDetail: "queued, ~1 ahead"},
+			want: "queued, ~1 ahead",
+		},
+		{
+			name: "queued without detail",
+			repo: store.Repo{Status: store.StatusQueued, StatusDetail: ""},
+			want: "queued",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatRepoStatus(&tt.repo)
+			if got != tt.want {
+				t.Errorf("formatRepoStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestListReposShowsQueuedStatus(t *testing.T) {
+	cs, _, s, cleanup := setupListReposTest(t, false)
+	defer cleanup()
+
+	repoID, err := s.UpsertRepo("queued-alias", "https://example.com/repo", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+	if err := s.UpdateRepoStatus(repoID, store.StatusQueued, "queued, ~3 ahead"); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+
+	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_repos",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("unexpected tool error")
+	}
+
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+
+	if !strings.Contains(text.Text, "Status: queued, ~3 ahead") {
+		t.Errorf("expected 'Status: queued, ~3 ahead' in output, got: %s", text.Text)
+	}
+}
+
 func TestComputeStaleness(t *testing.T) {
 	tests := []struct {
 		name      string
