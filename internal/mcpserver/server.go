@@ -185,17 +185,27 @@ func (s *Server) runJob(j *Job) JobResult {
 	}
 
 	// Success. Rebuild FTS so subsequent searches see the new docs.
-	if rebuildErr := s.store.RebuildFTS(); rebuildErr != nil {
+	rebuildErr := s.store.RebuildFTS()
+	if rebuildErr != nil {
 		log.Printf("queue: %s rebuild fts failed: %v", j.Alias, rebuildErr)
 	}
 	if j.RepoID != 0 {
-		if dbErr := s.store.UpdateRepoStatus(j.RepoID, store.StatusReady, ""); dbErr != nil {
-			log.Printf("queue: %s set ready status: %v", j.Alias, dbErr)
+		status := store.StatusReady
+		detail := ""
+		if rebuildErr != nil {
+			status = store.StatusError
+			detail = "fts rebuild failed: " + rebuildErr.Error()
+		}
+		if dbErr := s.store.UpdateRepoStatus(j.RepoID, status, detail); dbErr != nil {
+			log.Printf("queue: %s set %s status: %v", j.Alias, status, dbErr)
 		}
 	}
 
 	if result != nil {
 		log.Printf("queue: %s indexed %d docs in %s", j.Alias, result.DocsIndexed, result.Duration.Round(time.Millisecond))
+	}
+	if rebuildErr != nil {
+		return JobResult{IndexResult: result, Err: rebuildErr}
 	}
 	return JobResult{IndexResult: result, Err: nil}
 }
