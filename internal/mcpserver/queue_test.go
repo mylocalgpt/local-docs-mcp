@@ -552,6 +552,96 @@ func TestQueueDequeueWhileRunning(t *testing.T) {
 	}
 }
 
+// TestQueueUserJobJumpsAheadOfBackground verifies that an `add_docs` user
+// job enqueued after a background auto-refresh job for a different alias
+// runs first, even though the background job was enqueued earlier.
+//
+// Determinism note: the worker's priority gate
+// (queue.go ~lines 214-217) is:
+//
+//	select {
+//	case j := <-q.userJobs:  // tried first, non-blocking
+//	    q.handle(j, run)
+//	default:
+//	    select { /* user | bg | ctx.Done */ }
+//	}
+//
+// We pre-populate BOTH lanes before the worker starts. On its first
+// iteration the outer non-blocking select finds userJobs ready and runs
+// the user job. There is exactly one non-default case and it is satisfied,
+// so ordering is deterministic. Do NOT "simplify" by collapsing the two
+// selects: doing so would let the runtime pick either lane and break this
+// guarantee.
+func TestQueueUserJobJumpsAheadOfBackground(t *testing.T) {
+	cs, srv, cleanup := setupAddDocsTest(t)
+	defer cleanup()
+	_ = cs // unused; we drive the queue directly
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	// Prime BOTH blocks BEFORE enqueue so neither completes until released.
+	releaseBg := bi.Block("bg")
+	releaseUser := bi.Block("user")
+
+	bgJob := &Job{Alias: "bg", Kind: jobKindGit, URL: "https://example.com/bg", Priority: priorityBackground}
+	userJob := &Job{Alias: "user", Kind: jobKindGit, URL: "https://example.com/user", Priority: priorityUser}
+
+	if _, _, _, _, err := srv.queue.enqueue(bgJob); err != nil {
+		t.Fatalf("enqueue bg: %v", err)
+	}
+	if _, _, _, _, err := srv.queue.enqueue(userJob); err != nil {
+		t.Fatalf("enqueue user: %v", err)
+	}
+
+	// Start worker AFTER both enqueues + both blocks.
+	workerCtx, cancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		srv.queue.worker(workerCtx, srv.runJob)
+	}()
+	defer func() {
+		cancel()
+		<-workerDone
+	}()
+
+	// Wait until the worker reports its first call.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.Calls()) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	calls := bi.Calls()
+	if len(calls) == 0 {
+		t.Fatal("worker did not pick up any job within 2s")
+	}
+	if calls[0].Alias != "user" {
+		t.Fatalf("first call alias = %q, want %q (priority gate broken)", calls[0].Alias, "user")
+	}
+
+	// Release both, let the worker drain.
+	close(releaseUser)
+	close(releaseBg)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.Calls()) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	calls = bi.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls total, got %d: %+v", len(calls), calls)
+	}
+	if calls[1].Alias != "bg" {
+		t.Errorf("second call alias = %q, want %q", calls[1].Alias, "bg")
+	}
+}
+
 // itoa is a tiny no-import-strconv helper used by the capacity test where
 // we just need stable distinct strings.
 func itoa(n int) string {

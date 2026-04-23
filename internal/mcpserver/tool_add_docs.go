@@ -205,7 +205,11 @@ func addDocsResponse(alias, source string, paths []string, position int, coalesc
 	case pathsChanged:
 		fmt.Fprintf(&b, "Already queued (~%d ahead); your paths have been merged into the pending job.", position)
 	default:
-		fmt.Fprintf(&b, "Already queued (~%d ahead); your paths are already covered.", position)
+		if isLocal {
+			fmt.Fprintf(&b, "Already queued (~%d ahead); folder will be re-scanned automatically.", position)
+		} else {
+			fmt.Fprintf(&b, "Paths already queued (~%d ahead); repo will be re-fetched and re-indexed automatically.", position)
+		}
 	}
 	return b.String()
 }

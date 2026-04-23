@@ -75,7 +75,7 @@ func (s *Server) updateSingleRepo(ctx context.Context, alias string) (*mcp.CallT
 		return nil, nil, err
 	}
 
-	done, position, _, _, enqErr := s.queue.enqueue(job)
+	done, position, coalesced, _, enqErr := s.queue.enqueue(job)
 	if enqErr != nil {
 		if errors.Is(enqErr, errQueueFull) {
 			return &mcp.CallToolResult{
@@ -84,8 +84,16 @@ func (s *Server) updateSingleRepo(ctx context.Context, alias string) (*mcp.CallT
 		}
 		return nil, nil, fmt.Errorf("enqueue: %w", enqErr)
 	}
-	if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-		return nil, nil, fmt.Errorf("set status: %w", dbErr)
+	if coalesced {
+		msg := fmt.Sprintf("Re-using in-flight indexing for %q (~%d ahead in queue). Call list_repos to see when it completes.", alias, position)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		}, nil, nil
+	}
+	if !coalesced {
+		if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
+			return nil, nil, fmt.Errorf("set status: %w", dbErr)
+		}
 	}
 
 	start := time.Now()
@@ -134,6 +142,14 @@ type pendingUpdate struct {
 	done  chan JobResult
 }
 
+// coalescedUpdate tracks a repo whose enqueue piggy-backed onto an in-flight
+// or already-pending job. updateAllRepos reports these in a separate
+// "in flight" bucket so the summary does not lie about what work was done.
+type coalescedUpdate struct {
+	alias    string
+	position int
+}
+
 // updateAllRepos re-indexes all repos from the database.
 func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, error) {
 	repos, err := s.store.ListRepos()
@@ -142,8 +158,9 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 	}
 
 	var (
-		results  []indexer.IndexResult
-		pendings []pendingUpdate
+		results           []indexer.IndexResult
+		pendings          []pendingUpdate
+		coalescedAliases  []coalescedUpdate
 	)
 
 	// First pass: enqueue every repo we can. Errors that prevent enqueue
@@ -158,14 +175,20 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 			continue
 		}
 
-		done, position, _, _, enqErr := s.queue.enqueue(job)
+		done, position, coalesced, _, enqErr := s.queue.enqueue(job)
 		if enqErr != nil {
 			results = append(results, indexer.IndexResult{Repo: repo.Alias, Error: enqErr})
 			continue
 		}
-		if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-			results = append(results, indexer.IndexResult{Repo: repo.Alias, Error: dbErr})
+		if coalesced {
+			coalescedAliases = append(coalescedAliases, coalescedUpdate{alias: repo.Alias, position: position})
 			continue
+		}
+		if !coalesced {
+			if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
+				results = append(results, indexer.IndexResult{Repo: repo.Alias, Error: dbErr})
+				continue
+			}
 		}
 		pendings = append(pendings, pendingUpdate{alias: repo.Alias, done: done})
 	}
@@ -176,7 +199,7 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 	// Second pass: collect each result. If the caller cancels mid-loop, drain
 	// the rest by dequeueing pending entries and synthesizing skipped rows so
 	// the aggregate report stays honest about what was abandoned.
-	for idx, p := range pendings {
+	for _, p := range pendings {
 		if cancelled {
 			s.queue.dequeue(p.alias)
 			results = append(results, indexer.IndexResult{Repo: p.alias, Skipped: true, Error: ctx.Err()})
@@ -198,7 +221,6 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 			s.queue.dequeue(p.alias)
 			results = append(results, indexer.IndexResult{Repo: p.alias, Skipped: true, Error: ctx.Err()})
 			// Continue the loop to drain remaining pendings.
-			_ = idx
 		}
 	}
 
@@ -220,13 +242,22 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 		}
 	}
 
-	total := len(results)
+	for _, c := range coalescedAliases {
+		fmt.Fprintf(&b, "%s: re-using in-flight indexing (~%d ahead in queue); call list_repos to see when it completes\n", c.alias, c.position)
+	}
+
+	total := len(results) + len(coalescedAliases)
 	duration := time.Since(start).Round(time.Millisecond)
-	fmt.Fprintf(&b, "\n%d repos checked in %s.", total, duration)
-	if errCount > 0 {
-		fmt.Fprintf(&b, " %d updated, %d unchanged, %d errors.\n", updated, unchanged, errCount)
-	} else {
-		fmt.Fprintf(&b, " %d updated, %d unchanged.\n", updated, unchanged)
+	inflight := len(coalescedAliases)
+	switch {
+	case errCount == 0 && inflight == 0:
+		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged.\n", total, duration, updated, unchanged)
+	case errCount > 0 && inflight == 0:
+		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d errors.\n", total, duration, updated, unchanged, errCount)
+	case errCount == 0 && inflight > 0:
+		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d in flight.\n", total, duration, updated, unchanged, inflight)
+	default:
+		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d errors, %d in flight.\n", total, duration, updated, unchanged, errCount, inflight)
 	}
 
 	return &mcp.CallToolResult{
