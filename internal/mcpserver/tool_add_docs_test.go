@@ -29,7 +29,7 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
-		_ = s.Close()
+		s.Close()
 		t.Fatalf("create indexer: %v", err)
 	}
 
@@ -43,8 +43,8 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	_, err = srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		_ = ix.Cleanup()
-		_ = s.Close()
+		ix.Cleanup()
+		s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -56,15 +56,15 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		_ = ix.Cleanup()
-		_ = s.Close()
+		ix.Cleanup()
+		s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
 		cancel()
-		_ = ix.Cleanup()
-		_ = s.Close()
+		ix.Cleanup()
+		s.Close()
 	}
 
 	return clientSession, srv, cleanup
@@ -152,22 +152,26 @@ func TestAddDocsLocalSource(t *testing.T) {
 		t.Errorf("response should contain alias, got: %s", text)
 	}
 
-	// Wait for background indexing to complete by polling the mutex.
-	// The goroutine holds the lock while indexing; when we can acquire it,
-	// indexing is done.
-	waitDone := make(chan struct{})
+	// Drive the queue worker manually so the test can wait on a single
+	// indexing run without racing the server's background goroutine.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
 	go func() {
-		srv.indexMu.Lock()
-		//nolint:staticcheck // SA2001: intentional empty critical section to detect lock release
-		srv.indexMu.Unlock()
-		close(waitDone)
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
 	}()
 
-	select {
-	case <-waitDone:
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for indexing to complete")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		repo, _ := srv.store.GetRepo("local-test")
+		if repo != nil && repo.Status == store.StatusReady {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	workerCancel()
+	<-workerDone
 
 	// Now safe to close
 	defer cleanup()
@@ -190,31 +194,76 @@ func TestAddDocsLocalSource(t *testing.T) {
 	}
 }
 
-func TestAddDocsMutexContention(t *testing.T) {
+func TestAddDocsCoalescesSameAlias(t *testing.T) {
 	cs, srv, cleanup := setupAddDocsTest(t)
 	defer cleanup()
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	// Block a different alias to keep the worker busy. While it is parked,
+	// any subsequent add_docs calls accumulate as pending entries that
+	// coalesce with each other.
+	blockerRelease := bi.Block("blocker")
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "test.md"), []byte("# Test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Hold the lock manually
-	srv.indexMu.Lock()
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
 
-	result, err := callAddDocs(t, cs, map[string]any{
+	// Park the worker on "blocker".
+	blockerDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(blockerDir, "b.md"), []byte("# B\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callAddDocs(t, cs, map[string]any{
+		"alias": "blocker",
+		"path":  blockerDir,
+	}); err != nil {
+		t.Fatalf("blocker add_docs: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.CallsFor("blocker")) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	first, err := callAddDocs(t, cs, map[string]any{
 		"alias": "locked-test",
 		"path":  dir,
 	})
-
-	srv.indexMu.Unlock()
-
 	if err != nil {
-		t.Fatalf("expected non-error response, got: %v", err)
+		t.Fatalf("first add_docs: %v", err)
+	}
+	if !strings.Contains(first.Content[0].(*mcp.TextContent).Text, "Queued for indexing") {
+		t.Errorf("first call should report queued, got: %s", first.Content[0].(*mcp.TextContent).Text)
 	}
 
-	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "already in progress") {
-		t.Errorf("expected 'already in progress' message, got: %s", text)
+	second, err := callAddDocs(t, cs, map[string]any{
+		"alias": "locked-test",
+		"path":  dir,
+	})
+	if err != nil {
+		t.Fatalf("second add_docs: %v", err)
 	}
+	text := second.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "Already queued") {
+		t.Errorf("expected 'Already queued' message, got: %s", text)
+	}
+
+	close(blockerRelease)
 }

@@ -53,6 +53,7 @@ type Job struct {
 	Force       bool
 	Priority    JobPriority
 	PriorStatus string // repo's status before being set to queued; used to revert on shutdown
+	RepoID      int64  // DB row id; set by handlers so worker/shutdown can update without an alias lookup
 	seq         uint64 // monotonic; assigned at enqueue under mu; used for position calc
 	Done        chan JobResult
 }

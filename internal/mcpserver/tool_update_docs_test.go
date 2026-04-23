@@ -36,7 +36,7 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		_ = s.Close()
+		s.Close()
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -48,15 +48,15 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		_ = s.Close()
+		s.Close()
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		_ = clientSession.Close()
-		_ = serverSession.Wait()
+		clientSession.Close()
+		serverSession.Wait()
 		cancel()
-		_ = s.Close()
+		s.Close()
 	}
 
 	return clientSession, serverSession, srv, cleanup
@@ -108,13 +108,13 @@ func TestUpdateDocsRepoNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp store: %v", err)
 	}
-	defer s.Close() //nolint:errcheck
+	defer s.Close()
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		t.Fatalf("create indexer: %v", err)
 	}
-	defer ix.Cleanup() //nolint:errcheck
+	defer ix.Cleanup()
 
 	srv.indexer = ix
 
@@ -142,56 +142,70 @@ func TestUpdateDocsRepoNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateDocsConcurrencyGuard(t *testing.T) {
-	cfg := &config.Config{Repos: []config.RepoConfig{
-		{URL: "https://example.com/repo.git", Paths: []string{"docs"}, Alias: "test"},
-	}}
+func TestUpdateDocsWaitsForRunningJob(t *testing.T) {
+	cfg := &config.Config{Repos: []config.RepoConfig{}}
 
 	cs, _, srv, cleanup := setupUpdateTest(t, cfg)
 	defer cleanup()
 
-	// Lock the mutex before calling update_docs to simulate an in-progress index
-	srv.indexMu.Lock()
-
-	// Set a non-nil indexer
-	s, err := store.NewStore(":memory:")
-	if err != nil {
-		t.Fatalf("create temp store: %v", err)
-	}
-	defer s.Close() //nolint:errcheck
-
-	ix, err := indexer.NewIndexer(s)
-	if err != nil {
-		t.Fatalf("create indexer: %v", err)
-	}
-	defer ix.Cleanup() //nolint:errcheck
-
-	srv.indexer = ix
-
-	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "update_docs",
-		Arguments: map[string]any{},
-	})
-	if err != nil {
-		t.Fatalf("call tool: %v", err)
+	// Pre-populate a repo so update_docs has something to enqueue.
+	if _, err := srv.store.UpsertRepo("test", "https://example.com/repo.git", `["docs"]`, "git"); err != nil {
+		t.Fatalf("upsert repo: %v", err)
 	}
 
-	// Should NOT be an error - just a friendly message
-	if result.IsError {
-		t.Fatal("expected IsError=false for concurrency guard")
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	// Block the alias once so the worker pauses inside IndexRepo. update_docs
+	// is supposed to wait for that to finish, then report its own result.
+	release := bi.Block("test")
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
+
+	resultCh := make(chan *mcp.CallToolResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "update_docs",
+			Arguments: map[string]any{},
+		})
+		resultCh <- r
+		errCh <- e
+	}()
+
+	// Give the call time to enqueue and start running.
+	time.Sleep(50 * time.Millisecond)
+
+	// Confirm it hasn't returned yet.
+	select {
+	case <-resultCh:
+		t.Fatal("update_docs returned before its job was unblocked")
+	default:
 	}
 
-	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
+	close(release)
 
-	if !strings.Contains(text.Text, "already in progress") {
-		t.Errorf("expected 'already in progress' message, got: %s", text.Text)
+	select {
+	case r := <-resultCh:
+		err := <-errCh
+		if err != nil {
+			t.Fatalf("update_docs: %v", err)
+		}
+		if r.IsError {
+			t.Fatalf("update_docs IsError=true; got %s", r.Content[0].(*mcp.TextContent).Text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("update_docs never returned after job was unblocked")
 	}
-
-	// Unlock so cleanup can proceed
-	srv.indexMu.Unlock()
 }
 
 func TestFormatResult(t *testing.T) {
@@ -199,7 +213,7 @@ func TestFormatResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close() //nolint:errcheck
+	defer s.Close()
 
 	// Insert a repo so GetRepo works for commit SHA lookup
 	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`, "git")
@@ -273,7 +287,7 @@ func TestAutoRefreshStaleDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close() //nolint:errcheck
+	defer s.Close()
 
 	// Insert a stale repo (indexed 2 days ago)
 	repoID, err := s.UpsertRepo("stale-repo", "https://example.com/stale.git", `["docs"]`, "git")
@@ -344,7 +358,7 @@ func TestAutoRefreshNilIndexer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close() //nolint:errcheck
+	defer s.Close()
 
 	srv := &Server{
 		store:   s,
@@ -366,13 +380,13 @@ func TestAutoRefreshCancelledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close() //nolint:errcheck
+	defer s.Close()
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		t.Fatalf("create indexer: %v", err)
 	}
-	defer ix.Cleanup() //nolint:errcheck
+	defer ix.Cleanup()
 
 	srv := &Server{
 		store:   s,
