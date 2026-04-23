@@ -285,4 +285,178 @@ func TestUpdateDocs_CtxCancelWhileQueued(t *testing.T) {
 		}
 		t.Fatalf("expected no IndexLocalPath calls for B (it was dequeued), got %d: aliases=%v", len(calls), strings.Join(aliases, ","))
 	}
+
+	// Regression: cancelling while queued must also revert b's DB status
+	// (it was promoted to StatusQueued by enqueue). Without the revert b
+	// would strand at "queued" and autoRefresh would skip it forever.
+	// The server-side revert may land after the SDK returns ctx.Err to
+	// the caller, so poll briefly.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if r, _ := srv.store.GetRepo("b"); r != nil && r.Status != store.StatusQueued {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if r, err := srv.store.GetRepo("b"); err != nil {
+		t.Fatalf("get b: %v", err)
+	} else if r == nil {
+		t.Fatal("b repo missing")
+	} else if r.Status != store.StatusReady {
+		t.Errorf("b status after cancel-while-queued = %q, want %q", r.Status, store.StatusReady)
+	}
+}
+
+// TestAddDocsQueueFullMarksError verifies that when add_docs hits the
+// queue-full lane, the repo row is flipped to StatusError with a clear
+// detail rather than left at the schema default StatusReady. Covers both
+// a fresh alias (defect 2 reproducer where list_repos showed a 0-doc
+// "ready" row) and an existing alias that previously indexed cleanly.
+func TestAddDocsQueueFullMarksError(t *testing.T) {
+	cs, srv, cleanup := setupAddDocsTest(t)
+	defer cleanup()
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	// Pre-existing repo at StatusReady. add_docs for this alias must end at
+	// StatusError once the queue rejects it.
+	const existingAlias = "qfull-existing"
+	existingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(existingDir, "x.md"), []byte("# X\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.UpsertRepo(existingAlias, existingDir, "[]", "local"); err != nil {
+		t.Fatalf("upsert existing: %v", err)
+	}
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
+
+	// Saturate the queue using direct enqueue calls (avoids 100 unrelated
+	// UpsertRepo side effects). Pattern mirrors TestQueueCapacityFull.
+	releaseBlocker := bi.Block("blocker")
+	if _, _, _, _, err := srv.queue.enqueue(&Job{
+		Alias:    "blocker",
+		Kind:     jobKindGit,
+		URL:      "https://example.com/blocker",
+		Priority: priorityUser,
+	}); err != nil {
+		t.Fatalf("enqueue blocker: %v", err)
+	}
+
+	// Wait for the worker to be inside the blocker so the lane channel
+	// has full capacity available for the saturation enqueues.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.CallsFor("blocker")) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	for i := 0; i < queueCapacity; i++ {
+		alias := "filler-" + itoaLocal(i)
+		if _, _, _, _, err := srv.queue.enqueue(&Job{
+			Alias:    alias,
+			Kind:     jobKindGit,
+			URL:      "https://example.com/" + alias,
+			Priority: priorityUser,
+		}); err != nil {
+			t.Fatalf("enqueue filler %d: %v", i, err)
+		}
+	}
+
+	// Now any priorityUser add_docs MUST hit errQueueFull.
+
+	// Case 1: fresh alias.
+	const newAlias = "qfull-new"
+	resp, err := callAddDocs(t, cs, map[string]any{
+		"alias": newAlias,
+		"url":   "https://example.com/qfull-new",
+		"paths": []string{"docs/"},
+	})
+	if err != nil {
+		t.Fatalf("add_docs new: %v", err)
+	}
+	if resp.IsError {
+		t.Fatalf("add_docs new IsError=true: %s", resp.Content[0].(*mcp.TextContent).Text)
+	}
+	text := resp.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, errQueueFull.Error()) {
+		t.Errorf("add_docs new response missing queue-full text; got: %s", text)
+	}
+
+	r, err := srv.store.GetRepo(newAlias)
+	if err != nil {
+		t.Fatalf("get new: %v", err)
+	}
+	if r == nil {
+		t.Fatal("new repo missing")
+	}
+	if r.Status != store.StatusError {
+		t.Errorf("new repo status = %q, want %q", r.Status, store.StatusError)
+	}
+	if r.StatusDetail != "indexing queue full, retry later" {
+		t.Errorf("new repo status_detail = %q, want %q", r.StatusDetail, "indexing queue full, retry later")
+	}
+	if r.DocCount != 0 {
+		t.Errorf("new repo doc_count = %d, want 0", r.DocCount)
+	}
+
+	// Case 2: existing alias previously at StatusReady.
+	resp, err = callAddDocs(t, cs, map[string]any{
+		"alias": existingAlias,
+		"path":  existingDir,
+	})
+	if err != nil {
+		t.Fatalf("add_docs existing: %v", err)
+	}
+	if resp.IsError {
+		t.Fatalf("add_docs existing IsError=true: %s", resp.Content[0].(*mcp.TextContent).Text)
+	}
+	text = resp.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, errQueueFull.Error()) {
+		t.Errorf("add_docs existing response missing queue-full text; got: %s", text)
+	}
+
+	r, err = srv.store.GetRepo(existingAlias)
+	if err != nil {
+		t.Fatalf("get existing: %v", err)
+	}
+	if r == nil {
+		t.Fatal("existing repo missing")
+	}
+	if r.Status != store.StatusError {
+		t.Errorf("existing repo status = %q, want %q", r.Status, store.StatusError)
+	}
+	if r.StatusDetail != "indexing queue full, retry later" {
+		t.Errorf("existing repo status_detail = %q, want %q", r.StatusDetail, "indexing queue full, retry later")
+	}
+
+	// Cleanup so the worker can drain.
+	close(releaseBlocker)
+}
+
+// itoaLocal is a tiny no-import-strconv helper.
+func itoaLocal(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }

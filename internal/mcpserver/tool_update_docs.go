@@ -97,7 +97,8 @@ func (s *Server) updateSingleRepo(ctx context.Context, alias string) (*mcp.CallT
 	select {
 	case res = <-done:
 	case <-ctx.Done():
-		s.queue.dequeue(alias)
+		removed := s.queue.dequeue(alias)
+		s.revertQueuedStatus(removed, "")
 		return nil, nil, ctx.Err()
 	}
 
@@ -201,7 +202,8 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 	// the aggregate report stays honest about what was abandoned.
 	for _, p := range pendings {
 		if cancelled {
-			s.queue.dequeue(p.alias)
+			removed := s.queue.dequeue(p.alias)
+			s.revertQueuedStatus(removed, "")
 			results = append(results, indexer.IndexResult{Repo: p.alias, Skipped: true, Error: ctx.Err()})
 			continue
 		}
@@ -225,7 +227,8 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 			results = append(results, *result)
 		case <-ctx.Done():
 			cancelled = true
-			s.queue.dequeue(p.alias)
+			removed := s.queue.dequeue(p.alias)
+			s.revertQueuedStatus(removed, "")
 			results = append(results, indexer.IndexResult{Repo: p.alias, Skipped: true, Error: ctx.Err()})
 			// Continue the loop to drain remaining pendings.
 		}

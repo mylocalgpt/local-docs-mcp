@@ -79,11 +79,10 @@ Search syntax (FTS5): "exact phrase", term1 AND term2, prefix*`,
 		server: mcpSrv,
 		store:  s,
 		search: srch,
-		// Storing nil through the interface variable keeps the original
-		// "indexer not available" check working: ix == nil propagates as a
-		// typed-nil interface, so handlers explicitly compare to nil via the
-		// concrete type stored on the field. To avoid the typed-nil pitfall
-		// we only assign when ix is non-nil.
+		// Do not store a nil *indexer.Indexer in the interface field: that
+		// would produce a non-nil typed-nil interface value and break the
+		// "indexer not available" check in handlers. Leave srv.indexer unset
+		// unless ix is non-nil.
 		config: cfg,
 		queue:  newIndexQueue(s),
 	}
@@ -133,19 +132,28 @@ func (s *Server) Run(ctx context.Context) error {
 	// Drain anything that was still queued at shutdown and revert each job's
 	// DB status to its prior value so a restart finds a consistent picture.
 	for _, j := range s.queue.drainPending() {
-		if j.RepoID == 0 {
-			continue
-		}
-		prior := j.PriorStatus
-		if prior == "" {
-			prior = store.StatusReady
-		}
-		if dbErr := s.store.UpdateRepoStatus(j.RepoID, prior, ""); dbErr != nil {
-			log.Printf("queue: revert status for %s on shutdown: %v", j.Alias, dbErr)
-		}
+		s.revertQueuedStatus(j, "")
 	}
 
 	return err
+}
+
+// revertQueuedStatus restores a job's PriorStatus after the job was
+// removed from the queue without running. Used by handler-level
+// cancellation paths, the queue-full branch in add_docs, and the
+// shutdown drain so a removed-but-never-ran enqueue does not strand
+// the repo in StatusQueued (which autoRefresh deliberately skips).
+func (s *Server) revertQueuedStatus(j *Job, detail string) {
+	if j == nil || j.RepoID == 0 {
+		return
+	}
+	prior := j.PriorStatus
+	if prior == "" {
+		prior = store.StatusReady
+	}
+	if err := s.store.UpdateRepoStatus(j.RepoID, prior, detail); err != nil {
+		log.Printf("queue: revert queued status for %s: %v", j.Alias, err)
+	}
 }
 
 // runJob is the indexQueue worker callback. It performs a single indexing job

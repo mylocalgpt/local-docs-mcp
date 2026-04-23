@@ -205,20 +205,24 @@ func (q *indexQueue) position(alias string) int {
 	return count + 1
 }
 
-// dequeue removes a pending job for alias. Returns true if the job was
-// pending and not currently running. The orphan *Job remains in its lane
-// channel; the worker compensates via the pointer-equality check in handle.
-func (q *indexQueue) dequeue(alias string) bool {
+// dequeue removes a pending job for alias and returns it. Returns nil if
+// the alias is not pending or is currently running. The orphan *Job
+// remains in its lane channel; the worker compensates via the
+// pointer-equality check in handle. Callers that need to undo side
+// effects from enqueue (notably the StatusQueued DB write) should use
+// the returned job's PriorStatus and RepoID.
+func (q *indexQueue) dequeue(alias string) *Job {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if alias == q.running {
-		return false
+		return nil
 	}
-	if _, ok := q.pending[alias]; !ok {
-		return false
+	j, ok := q.pending[alias]
+	if !ok {
+		return nil
 	}
 	delete(q.pending, alias)
-	return true
+	return j
 }
 
 // worker is the single consumer of the queue. It must be started in its own

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
+	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
 // AddDocsInput defines the input schema for the add_docs tool.
@@ -104,6 +106,9 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 	_, position, coalesced, pathsChanged, enqErr := s.queue.enqueue(job)
 	if enqErr != nil {
 		if errors.Is(enqErr, errQueueFull) {
+			if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusError, "indexing queue full, retry later"); dbErr != nil {
+				log.Printf("add_docs: %s set queue-full status: %v", input.Alias, dbErr)
+			}
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: enqErr.Error()}},
 			}, nil, nil
@@ -156,6 +161,9 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 	_, position, coalesced, pathsChanged, enqErr := s.queue.enqueue(job)
 	if enqErr != nil {
 		if errors.Is(enqErr, errQueueFull) {
+			if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusError, "indexing queue full, retry later"); dbErr != nil {
+				log.Printf("add_docs: %s set queue-full status: %v", input.Alias, dbErr)
+			}
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: enqErr.Error()}},
 			}, nil, nil

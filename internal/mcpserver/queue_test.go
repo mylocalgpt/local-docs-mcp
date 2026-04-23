@@ -498,13 +498,20 @@ func TestQueueDequeueWhilePending(t *testing.T) {
 	}
 	time.Sleep(30 * time.Millisecond)
 
-	_, _, _, _, err = q.enqueue(&Job{Alias: "victim", Priority: priorityUser})
+	_, _, _, _, err = q.enqueue(&Job{Alias: "victim", Priority: priorityUser, PriorStatus: "ready", RepoID: 42})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !q.dequeue("victim") {
-		t.Fatalf("dequeue(victim) = false, want true")
+	removed := q.dequeue("victim")
+	if removed == nil {
+		t.Fatalf("dequeue(victim) = nil, want job")
+	}
+	if removed.Alias != "victim" {
+		t.Fatalf("dequeue(victim).Alias = %q, want %q", removed.Alias, "victim")
+	}
+	if removed.PriorStatus != "ready" || removed.RepoID != 42 {
+		t.Fatalf("dequeue(victim) did not propagate PriorStatus/RepoID: got %q/%d", removed.PriorStatus, removed.RepoID)
 	}
 
 	close(gate)
@@ -540,8 +547,8 @@ func TestQueueDequeueWhileRunning(t *testing.T) {
 	}
 	<-inside
 
-	if q.dequeue("live") {
-		t.Fatalf("dequeue while running should return false")
+	if q.dequeue("live") != nil {
+		t.Fatalf("dequeue while running should return nil")
 	}
 
 	close(release)
