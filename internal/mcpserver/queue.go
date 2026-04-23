@@ -163,20 +163,19 @@ func (q *indexQueue) enqueue(job *Job) (done chan JobResult, position int, coale
 	select {
 	case ch <- job:
 		pos := q.position(job.Alias)
-		q.mu.Unlock()
-		// Precondition: q.store != nil && job.RepoID != 0.
-		// We perform the StatusQueued DB write here (outside q.mu) so the
-		// worker's StatusIndexing write is guaranteed by SQLite's single
-		// writer to land after this one, eliminating the
-		// indexing -> queued -> indexing flicker. Releasing q.mu first
-		// avoids stalling the worker (which also takes q.mu in handle);
-		// the cosmetic risk is an off-by-one in `~N ahead` if another
-		// caller enqueues between unlock and write.
+		// Perform the StatusQueued DB write while still holding q.mu. The
+		// worker's handle() acquires q.mu before its first action (the
+		// StatusIndexing write), so writing under the lock here guarantees
+		// the queued status lands first and eliminates the
+		// indexing -> queued -> indexing flicker. This briefly impacts
+		// worker liveness (it must wait for q.mu and this DB write) but
+		// correctness wins over the small stall.
 		if q.store != nil && job.RepoID != 0 {
 			if dbErr := q.store.UpdateRepoStatus(job.RepoID, store.StatusQueued, formatQueuedDetail(pos)); dbErr != nil {
 				log.Printf("queue: %s set queued status: %v", job.Alias, dbErr)
 			}
 		}
+		q.mu.Unlock()
 		return job.Done, pos, false, true, nil
 	default:
 		delete(q.pending, job.Alias)
