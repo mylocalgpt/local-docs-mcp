@@ -62,7 +62,7 @@ func startWorker(t *testing.T, q *indexQueue, run func(*Job) JobResult) (stop fu
 }
 
 func TestQueueSingleJobCompletes(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	run := func(j *Job) JobResult {
 		rec.add(j.Alias)
@@ -88,7 +88,7 @@ func TestQueueSingleJobCompletes(t *testing.T) {
 }
 
 func TestQueueTwoDistinctAliasesFIFO(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	// Block first job until released so we can ensure b is queued behind a.
 	gate := make(chan struct{})
@@ -121,7 +121,7 @@ func TestQueueTwoDistinctAliasesFIFO(t *testing.T) {
 }
 
 func TestQueueCoalesceWhilePending(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	gate := make(chan struct{})
 	var capturedPaths []string
@@ -183,7 +183,7 @@ func TestQueueCoalesceWhilePending(t *testing.T) {
 }
 
 func TestQueueCoalesceWhileRunning(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	first := make(chan struct{})
 	release := make(chan struct{})
@@ -253,7 +253,7 @@ func TestQueueForceUpgradeBothDirections(t *testing.T) {
 		{"trueThenFalse", true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			q := newIndexQueue()
+			q := newIndexQueue(nil)
 			gate := make(chan struct{})
 			var observedForce bool
 			run := func(j *Job) JobResult {
@@ -297,7 +297,7 @@ func TestQueueForceUpgradeBothDirections(t *testing.T) {
 }
 
 func TestQueueUserPriorityBeatsBackground(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	gate := make(chan struct{})
 	run := func(j *Job) JobResult {
@@ -348,7 +348,7 @@ func TestQueueUserPriorityBeatsBackground(t *testing.T) {
 }
 
 func TestQueueCapacityFull(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	gate := make(chan struct{})
 	run := func(j *Job) JobResult {
 		<-gate
@@ -388,7 +388,7 @@ func TestQueueCapacityFull(t *testing.T) {
 }
 
 func TestQueuePanicRecovery(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	run := func(j *Job) JobResult {
 		if j.Alias == "boom" {
@@ -422,7 +422,7 @@ func TestQueuePanicRecovery(t *testing.T) {
 }
 
 func TestQueueCtxCancelDrain(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	gate := make(chan struct{})
 	run := func(j *Job) JobResult {
 		if j.Alias == "blocker" {
@@ -477,7 +477,7 @@ func TestQueueCtxCancelDrain(t *testing.T) {
 }
 
 func TestQueueDequeueWhilePending(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	gate := make(chan struct{})
 	run := func(j *Job) JobResult {
@@ -519,7 +519,7 @@ func TestQueueDequeueWhilePending(t *testing.T) {
 }
 
 func TestQueueDequeueWhileRunning(t *testing.T) {
-	q := newIndexQueue()
+	q := newIndexQueue(nil)
 	rec := &recorder{}
 	inside := make(chan struct{})
 	release := make(chan struct{})

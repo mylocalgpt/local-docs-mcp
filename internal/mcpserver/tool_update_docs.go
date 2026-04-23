@@ -90,11 +90,6 @@ func (s *Server) updateSingleRepo(ctx context.Context, alias string) (*mcp.CallT
 			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
 		}, nil, nil
 	}
-	if !coalesced {
-		if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-			return nil, nil, fmt.Errorf("set status: %w", dbErr)
-		}
-	}
 
 	start := time.Now()
 
@@ -158,9 +153,9 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 	}
 
 	var (
-		results           []indexer.IndexResult
-		pendings          []pendingUpdate
-		coalescedAliases  []coalescedUpdate
+		results          []indexer.IndexResult
+		pendings         []pendingUpdate
+		coalescedAliases []coalescedUpdate
 	)
 
 	// First pass: enqueue every repo we can. Errors that prevent enqueue
@@ -183,12 +178,6 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 		if coalesced {
 			coalescedAliases = append(coalescedAliases, coalescedUpdate{alias: repo.Alias, position: position})
 			continue
-		}
-		if !coalesced {
-			if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-				results = append(results, indexer.IndexResult{Repo: repo.Alias, Error: dbErr})
-				continue
-			}
 		}
 		pendings = append(pendings, pendingUpdate{alias: repo.Alias, done: done})
 	}

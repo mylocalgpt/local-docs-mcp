@@ -83,7 +83,7 @@ Search syntax (FTS5): "exact phrase", term1 AND term2, prefix*`,
 		// concrete type stored on the field. To avoid the typed-nil pitfall
 		// we only assign when ix is non-nil.
 		config: cfg,
-		queue:  newIndexQueue(),
+		queue:  newIndexQueue(s),
 	}
 	if ix != nil {
 		srv.indexer = ix

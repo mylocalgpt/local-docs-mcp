@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
+	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
 // JobKind discriminates between git-sourced and local-directory indexing jobs.
@@ -76,6 +77,10 @@ type indexQueue struct {
 	running  string
 	nextSeq  uint64
 	mu       sync.Mutex
+	// store, when non-nil, is used by enqueue to write StatusQueued atomically
+	// after a fresh insert. Tests that exercise the queue in isolation pass
+	// nil to skip the DB write.
+	store *store.Store
 }
 
 const queueCapacity = 100
@@ -84,12 +89,15 @@ var errQueueFull = errors.New("Indexing queue is full (100 jobs pending). Try ag
 
 // newIndexQueue constructs an empty queue with both lanes sized to
 // queueCapacity. Call worker(ctx, run) on the returned queue to start
-// processing.
-func newIndexQueue() *indexQueue {
+// processing. The store is used to write StatusQueued from inside enqueue
+// so the worker's StatusIndexing write is guaranteed to apply after; pass
+// nil from pure-queue unit tests.
+func newIndexQueue(s *store.Store) *indexQueue {
 	return &indexQueue{
 		userJobs: make(chan *Job, queueCapacity),
 		bgJobs:   make(chan *Job, queueCapacity),
 		pending:  make(map[string]*Job),
+		store:    s,
 	}
 }
 
@@ -112,7 +120,6 @@ func newIndexQueue() *indexQueue {
 //     and bg-then-user is rare. First writer wins.
 func (q *indexQueue) enqueue(job *Job) (done chan JobResult, position int, coalesced bool, pathsChanged bool, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	if existing, ok := q.pending[job.Alias]; ok {
 		// Coalesce into the pending entry. This covers two sub-cases:
@@ -130,7 +137,12 @@ func (q *indexQueue) enqueue(job *Job) (done chan JobResult, position int, coale
 		// is non-trivial and the bg-then-user case is rare in practice.
 
 		pathsChanged = len(existing.Paths) != before
-		return existing.Done, q.position(job.Alias), true, pathsChanged, nil
+		pos := q.position(job.Alias)
+		q.mu.Unlock()
+		// Skipping DB write on coalesce: position is unchanged for this
+		// alias's slot. If a future change causes coalesce to shift
+		// position, status_detail goes stale here.
+		return existing.Done, pos, true, pathsChanged, nil
 	}
 
 	// Fresh insert.
@@ -150,9 +162,25 @@ func (q *indexQueue) enqueue(job *Job) (done chan JobResult, position int, coale
 	// so the alias can be re-enqueued later.
 	select {
 	case ch <- job:
-		return job.Done, q.position(job.Alias), false, true, nil
+		pos := q.position(job.Alias)
+		q.mu.Unlock()
+		// Precondition: q.store != nil && job.RepoID != 0.
+		// We perform the StatusQueued DB write here (outside q.mu) so the
+		// worker's StatusIndexing write is guaranteed by SQLite's single
+		// writer to land after this one, eliminating the
+		// indexing -> queued -> indexing flicker. Releasing q.mu first
+		// avoids stalling the worker (which also takes q.mu in handle);
+		// the cosmetic risk is an off-by-one in `~N ahead` if another
+		// caller enqueues between unlock and write.
+		if q.store != nil && job.RepoID != 0 {
+			if dbErr := q.store.UpdateRepoStatus(job.RepoID, store.StatusQueued, formatQueuedDetail(pos)); dbErr != nil {
+				log.Printf("queue: %s set queued status: %v", job.Alias, dbErr)
+			}
+		}
+		return job.Done, pos, false, true, nil
 	default:
 		delete(q.pending, job.Alias)
+		q.mu.Unlock()
 		return nil, 0, false, false, errQueueFull
 	}
 }

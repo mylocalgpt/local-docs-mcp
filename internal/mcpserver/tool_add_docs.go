@@ -10,7 +10,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
-	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
 
 // AddDocsInput defines the input schema for the add_docs tool.
@@ -112,12 +111,6 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		return nil, nil, fmt.Errorf("enqueue: %w", enqErr)
 	}
 
-	if !coalesced {
-		if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-			return nil, nil, fmt.Errorf("set status: %w", dbErr)
-		}
-	}
-
 	msg := addDocsResponse(input.Alias, *input.URL, mergedPaths, position, coalesced, pathsChanged, false)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
@@ -168,12 +161,6 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 			}, nil, nil
 		}
 		return nil, nil, fmt.Errorf("enqueue: %w", enqErr)
-	}
-
-	if !coalesced {
-		if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-			return nil, nil, fmt.Errorf("set status: %w", dbErr)
-		}
 	}
 
 	msg := addDocsResponse(input.Alias, *input.Path, nil, position, coalesced, pathsChanged, true)
