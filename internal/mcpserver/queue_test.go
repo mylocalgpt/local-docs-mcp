@@ -42,13 +42,15 @@ func recvWithin(t *testing.T, ch <-chan JobResult, d time.Duration) JobResult {
 }
 
 // startWorker starts a worker goroutine and returns a stop func that
-// cancels its context and waits for it to exit.
+// cancels its context and waits for it to exit. The supplied run uses the
+// legacy single-arg shape; this helper adapts it to the ctx-aware signature
+// the queue worker requires.
 func startWorker(t *testing.T, q *indexQueue, run func(*Job) JobResult) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		q.worker(ctx, run)
+		q.worker(ctx, func(_ context.Context, j *Job) JobResult { return run(j) })
 		close(done)
 	}()
 	return func() {
@@ -434,7 +436,7 @@ func TestQueueCtxCancelDrain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
-		q.worker(ctx, run)
+		q.worker(ctx, func(_ context.Context, j *Job) JobResult { return run(j) })
 		close(workerDone)
 	}()
 

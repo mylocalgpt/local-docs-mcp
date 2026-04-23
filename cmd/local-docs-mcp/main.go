@@ -212,7 +212,7 @@ func runIndex() {
 			fmt.Fprintf(os.Stderr, "error: repo alias %q not found in config\n", *repoFilter)
 			os.Exit(1)
 		}
-		r, err := ix.IndexRepo(*repoCfg, false)
+		r, err := ix.IndexRepo(context.Background(), *repoCfg, false)
 		if err != nil {
 			indexErr = err
 		} else {
@@ -222,7 +222,7 @@ func runIndex() {
 			log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
 		}
 	} else {
-		results, indexErr = ix.IndexAll(cfg, false)
+		results, indexErr = ix.IndexAll(context.Background(), cfg, false)
 	}
 
 	if indexErr != nil {
@@ -396,7 +396,7 @@ func runUpdate() {
 				fmt.Fprintf(os.Stderr, "Repo alias '%s' not found in config\n", aliasArg)
 				os.Exit(1)
 			}
-			r, err := ix.IndexRepo(*repoCfg, *force)
+			r, err := ix.IndexRepo(context.Background(), *repoCfg, *force)
 			if err != nil {
 				indexErr = err
 			} else {
@@ -406,7 +406,7 @@ func runUpdate() {
 				log.Printf("warning: FTS rebuild failed: %v", rebuildErr)
 			}
 		} else {
-			results, indexErr = ix.IndexAll(cfg, *force)
+			results, indexErr = ix.IndexAll(context.Background(), cfg, *force)
 		}
 
 		if indexErr != nil {
@@ -459,7 +459,7 @@ func updateFromDB(s *store.Store, ix *indexer.Indexer, aliasFilter string, force
 // indexRepoByType indexes a repo based on its source type.
 func indexRepoByType(ix *indexer.Indexer, repo *store.Repo, force bool) *indexer.IndexResult {
 	if repo.SourceType == "local" {
-		result, err := ix.IndexLocalPath(repo.Alias, repo.URL)
+		result, err := ix.IndexLocalPath(context.Background(), repo.Alias, repo.URL)
 		if err != nil {
 			return &indexer.IndexResult{Repo: repo.Alias, Error: err}
 		}
@@ -472,7 +472,7 @@ func indexRepoByType(ix *indexer.Indexer, repo *store.Repo, force bool) *indexer
 	}
 
 	cfg := config.RepoConfig{Alias: repo.Alias, URL: repo.URL, Paths: paths}
-	result, err := ix.IndexRepo(cfg, force)
+	result, err := ix.IndexRepo(context.Background(), cfg, force)
 	if err != nil {
 		return &indexer.IndexResult{Repo: repo.Alias, Error: err}
 	}

@@ -21,10 +21,12 @@ var Version = "dev"
 
 // indexerIface is the subset of *indexer.Indexer that the server uses to run
 // indexing jobs. Extracted as an interface so tests can substitute a fake
-// (e.g. BlockingIndexer) without driving real git operations.
+// (e.g. BlockingIndexer) without driving real git operations. ctx is first
+// per Go convention; the worker passes its own ctx so shutdown cancels the
+// in-flight job.
 type indexerIface interface {
-	IndexRepo(cfg config.RepoConfig, force bool) (*indexer.IndexResult, error)
-	IndexLocalPath(alias, path string) (*indexer.IndexResult, error)
+	IndexRepo(ctx context.Context, cfg config.RepoConfig, force bool) (*indexer.IndexResult, error)
+	IndexLocalPath(ctx context.Context, alias, path string) (*indexer.IndexResult, error)
 }
 
 // Server wraps the MCP protocol server and the application dependencies
@@ -148,8 +150,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 // runJob is the indexQueue worker callback. It performs a single indexing job
 // synchronously and returns its outcome. DB status transitions and per-job
-// log lines live here so all queued work funnels through one place.
-func (s *Server) runJob(j *Job) JobResult {
+// log lines live here so all queued work funnels through one place. ctx is
+// the worker's context: cancelling it interrupts the in-flight indexer call
+// and routes through the cancellation status policy below (revert
+// PriorStatus, do NOT write StatusError).
+func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 	if j.RepoID != 0 {
 		if err := s.store.UpdateRepoStatus(j.RepoID, store.StatusIndexing, kindDetail(j.Kind)); err != nil {
 			log.Printf("queue: %s set indexing status: %v", j.Alias, err)
@@ -162,16 +167,34 @@ func (s *Server) runJob(j *Job) JobResult {
 	)
 	switch j.Kind {
 	case jobKindLocal:
-		result, err = s.indexer.IndexLocalPath(j.Alias, j.URL)
+		result, err = s.indexer.IndexLocalPath(ctx, j.Alias, j.URL)
 	default:
 		cfg := config.RepoConfig{Alias: j.Alias, URL: j.URL, Paths: j.Paths}
-		result, err = s.indexer.IndexRepo(cfg, j.Force)
+		result, err = s.indexer.IndexRepo(ctx, cfg, j.Force)
 	}
 
 	// Combine Go error and indexer-reported error into a single failure path.
 	jobErr := err
 	if jobErr == nil && result != nil && result.Error != nil {
 		jobErr = result.Error
+	}
+
+	// Cancellation: do NOT mark the repo as errored. Restore PriorStatus
+	// (or ready as a fallback) with a breadcrumb in status_detail so
+	// operators can see what happened on restart. Then return the ctx
+	// error so update_docs callers can render a distinct message.
+	if jobErr != nil && (errors.Is(jobErr, context.Canceled) || errors.Is(jobErr, context.DeadlineExceeded)) {
+		log.Printf("queue: %s cancelled at shutdown", j.Alias)
+		if j.RepoID != 0 {
+			prior := j.PriorStatus
+			if prior == "" {
+				prior = store.StatusReady
+			}
+			if dbErr := s.store.UpdateRepoStatus(j.RepoID, prior, "cancelled at shutdown"); dbErr != nil {
+				log.Printf("queue: %s revert status on cancel: %v", j.Alias, dbErr)
+			}
+		}
+		return JobResult{IndexResult: result, Err: jobErr}
 	}
 
 	if jobErr != nil {

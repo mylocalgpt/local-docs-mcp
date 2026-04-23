@@ -101,6 +101,16 @@ func (s *Server) updateSingleRepo(ctx context.Context, alias string) (*mcp.CallT
 		return nil, nil, ctx.Err()
 	}
 
+	// Server-shutdown cancellation: runJob already reverted the repo's
+	// status. Surface a distinct message rather than the misleading
+	// "<alias>: error - context canceled" row that formatResult would emit.
+	if errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded) {
+		msg := fmt.Sprintf("Indexing for %q was cancelled by server shutdown. The repo's status was reverted; re-run update_docs after the server is back up.", alias)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		}, nil, nil
+	}
+
 	// Convert JobResult into the per-repo IndexResult shape used by the formatter.
 	var result *indexer.IndexResult
 	if res.IndexResult != nil {
@@ -156,6 +166,7 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 		results          []indexer.IndexResult
 		pendings         []pendingUpdate
 		coalescedAliases []coalescedUpdate
+		cancelledAliases []string
 	)
 
 	// First pass: enqueue every repo we can. Errors that prevent enqueue
@@ -197,6 +208,13 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 
 		select {
 		case res := <-p.done:
+			// Server-shutdown cancellation: bucket separately so the
+			// summary stays honest. runJob already reverted the repo
+			// status; do not emit an error row.
+			if errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded) {
+				cancelledAliases = append(cancelledAliases, p.alias)
+				continue
+			}
 			result := res.IndexResult
 			if result == nil {
 				result = &indexer.IndexResult{Repo: p.alias}
@@ -235,19 +253,31 @@ func (s *Server) updateAllRepos(ctx context.Context) (*mcp.CallToolResult, any, 
 		fmt.Fprintf(&b, "%s: re-using in-flight indexing (~%d ahead in queue); call list_repos to see when it completes\n", c.alias, c.position)
 	}
 
-	total := len(results) + len(coalescedAliases)
+	for _, alias := range cancelledAliases {
+		fmt.Fprintf(&b, "%s: cancelled by server shutdown\n", alias)
+	}
+
+	total := len(results) + len(coalescedAliases) + len(cancelledAliases)
 	duration := time.Since(start).Round(time.Millisecond)
 	inflight := len(coalescedAliases)
-	switch {
-	case errCount == 0 && inflight == 0:
-		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged.\n", total, duration, updated, unchanged)
-	case errCount > 0 && inflight == 0:
-		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d errors.\n", total, duration, updated, unchanged, errCount)
-	case errCount == 0 && inflight > 0:
-		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d in flight.\n", total, duration, updated, unchanged, inflight)
-	default:
-		fmt.Fprintf(&b, "\n%d repos checked in %s. %d updated, %d unchanged, %d errors, %d in flight.\n", total, duration, updated, unchanged, errCount, inflight)
+	cancelledCount := len(cancelledAliases)
+
+	// Build the summary by appending only non-zero buckets in a fixed order
+	// (errors, in flight, cancelled) so the format stays consistent across
+	// every combination.
+	var summary strings.Builder
+	fmt.Fprintf(&summary, "\n%d repos checked in %s. %d updated, %d unchanged", total, duration, updated, unchanged)
+	if errCount > 0 {
+		fmt.Fprintf(&summary, ", %d errors", errCount)
 	}
+	if inflight > 0 {
+		fmt.Fprintf(&summary, ", %d in flight", inflight)
+	}
+	if cancelledCount > 0 {
+		fmt.Fprintf(&summary, ", %d cancelled", cancelledCount)
+	}
+	summary.WriteString(".\n")
+	b.WriteString(summary.String())
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},

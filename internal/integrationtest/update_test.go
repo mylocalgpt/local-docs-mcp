@@ -3,6 +3,7 @@
 package integrationtest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +29,7 @@ func TestUpdateSkipsUnchanged(t *testing.T) {
 		Alias: "entra-hybrid",
 	}
 
-	result, err := ix.IndexRepo(cfg, false)
+	result, err := ix.IndexRepo(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("index repo: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestUpdateForceReindex(t *testing.T) {
 	}
 
 	// First index
-	result1, err := ix.IndexRepo(cfg, false)
+	result1, err := ix.IndexRepo(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("first index: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestUpdateForceReindex(t *testing.T) {
 	}
 	defer ix2.Cleanup()
 
-	result2, err := ix2.IndexRepo(cfg, true)
+	result2, err := ix2.IndexRepo(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("force reindex: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestRemoveAndReindex(t *testing.T) {
 	}
 
 	// Index
-	result, err := ix.IndexRepo(cfg, false)
+	result, err := ix.IndexRepo(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("index: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestRemoveAndReindex(t *testing.T) {
 	}
 	defer ix2.Cleanup()
 
-	result2, err := ix2.IndexRepo(cfg, false)
+	result2, err := ix2.IndexRepo(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("reindex: %v", err)
 	}

@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -87,20 +88,27 @@ func (b *BlockingIndexer) CallsFor(alias string) []IndexerCall {
 }
 
 // IndexRepo records the call, then blocks on the per-alias release channel
-// (if one was primed) before returning.
-func (b *BlockingIndexer) IndexRepo(cfg config.RepoConfig, force bool) (*indexer.IndexResult, error) {
-	b.recordAndWait(IndexerCall{Alias: cfg.Alias, URL: cfg.URL, Paths: cfg.Paths, Force: force, Local: false})
+// (if one was primed) before returning. ctx is honoured: if it cancels while
+// waiting on the block channel, recordAndWait returns ctx.Err() and IndexRepo
+// surfaces it so runJob sees context.Canceled.
+func (b *BlockingIndexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force bool) (*indexer.IndexResult, error) {
+	if err := b.recordAndWait(ctx, IndexerCall{Alias: cfg.Alias, URL: cfg.URL, Paths: cfg.Paths, Force: force, Local: false}); err != nil {
+		return nil, err
+	}
 	return b.takeResult(cfg.Alias), nil
 }
 
 // IndexLocalPath records the call, then blocks on the per-alias release
-// channel (if one was primed) before returning.
-func (b *BlockingIndexer) IndexLocalPath(alias, path string) (*indexer.IndexResult, error) {
-	b.recordAndWait(IndexerCall{Alias: alias, URL: path, Local: true})
+// channel (if one was primed) before returning. ctx is honoured the same way
+// as IndexRepo.
+func (b *BlockingIndexer) IndexLocalPath(ctx context.Context, alias, path string) (*indexer.IndexResult, error) {
+	if err := b.recordAndWait(ctx, IndexerCall{Alias: alias, URL: path, Local: true}); err != nil {
+		return nil, err
+	}
 	return b.takeResult(alias), nil
 }
 
-func (b *BlockingIndexer) recordAndWait(c IndexerCall) {
+func (b *BlockingIndexer) recordAndWait(ctx context.Context, c IndexerCall) error {
 	b.mu.Lock()
 	b.calls = append(b.calls, c)
 	ch := b.blocks[c.Alias]
@@ -108,8 +116,13 @@ func (b *BlockingIndexer) recordAndWait(c IndexerCall) {
 	b.mu.Unlock()
 
 	if ch != nil {
-		<-ch
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+	return nil
 }
 
 func (b *BlockingIndexer) takeResult(alias string) *indexer.IndexResult {

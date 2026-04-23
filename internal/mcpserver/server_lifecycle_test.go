@@ -8,7 +8,6 @@ import (
 
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
-
 // TestServerLifecycle_DrainAfterCompletedJob exercises the worker + drain
 // path that Server.Run owns at shutdown. The test starts the queue worker
 // directly (Server.Run owns stdio so we cannot call it in a unit test),
@@ -126,6 +125,119 @@ func TestServerLifecycle_DrainAfterCompletedJob(t *testing.T) {
 	if running != "" {
 		t.Errorf("queue.running = %q, want empty", running)
 	}
+}
 
-	// TODO(phase3): add cancel-while-blocked variant asserting context.Canceled + PriorStatus restore.
+// TestServerLifecycle_CancelWhileBlocked exercises the Phase 3 shutdown
+// cancellation path: ctx is cancelled WHILE the indexer is parked inside an
+// IndexLocalPath call. Asserts the worker exits promptly, the in-flight job
+// receives context.Canceled (not StatusError), and the repo's PriorStatus
+// (ready) is restored rather than left as indexing.
+func TestServerLifecycle_CancelWhileBlocked(t *testing.T) {
+	cs, srv, cleanup := setupAddDocsTest(t)
+	defer cleanup()
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	dir := t.TempDir()
+
+	// Pre-seed PriorStatus so the cancel path can prove the revert.
+	// UpsertRepo inserts the row but does not write status; a follow-up
+	// UpdateRepoStatus moves it to ready, which add_docs's handler then
+	// reads into Job.PriorStatus.
+	repoID, err := srv.store.UpsertRepo("foo", dir, "[]", "local")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := srv.store.UpdateRepoStatus(repoID, store.StatusReady, ""); err != nil {
+		t.Fatalf("seed ready status: %v", err)
+	}
+
+	release := bi.Block("foo")
+
+	workerCtx, cancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		srv.queue.worker(workerCtx, srv.runJob)
+	}()
+
+	if _, err := callAddDocs(t, cs, map[string]any{
+		"alias": "foo",
+		"path":  dir,
+	}); err != nil {
+		cancel()
+		close(release)
+		<-workerDone
+		t.Fatalf("add_docs: %v", err)
+	}
+
+	// Wait for the worker to flip the repo into indexing (i.e. it is now
+	// parked inside BlockingIndexer.recordAndWait).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		repo, _ := srv.store.GetRepo("foo")
+		if repo != nil && repo.Status == store.StatusIndexing {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	repo, err := srv.store.GetRepo("foo")
+	if err != nil {
+		cancel()
+		close(release)
+		<-workerDone
+		t.Fatalf("get foo: %v", err)
+	}
+	if repo == nil || repo.Status != store.StatusIndexing {
+		cancel()
+		close(release)
+		<-workerDone
+		t.Fatalf("expected foo status=indexing, got %+v", repo)
+	}
+
+	// Cancel the worker context. The ctx-aware recordAndWait returns
+	// context.Canceled, runJob takes the cancellation branch, and the
+	// worker loop exits. We do NOT close(release): the whole point is to
+	// prove cancellation kicks in without it.
+	cancel()
+
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		// Release the block as a best-effort cleanup before failing so
+		// other tests aren't dragged down by a hung goroutine.
+		close(release)
+		t.Fatal("worker goroutine did not exit within 2s after cancel")
+	}
+
+	// drainPending should be empty: handle() removed the in-flight job
+	// from pending before invoking run(), so cancellation routes through
+	// the runJob context-cancelled branch, not the drain path.
+	drained := srv.queue.drainPending()
+	if len(drained) != 0 {
+		t.Fatalf("drainPending returned %d jobs, want 0", len(drained))
+	}
+
+	// Final status must be exactly ready (the PriorStatus we seeded), not
+	// error and not indexing. This proves the revert path works.
+	repo, err = srv.store.GetRepo("foo")
+	if err != nil {
+		t.Fatalf("get foo: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("expected foo to exist after cancel")
+	}
+	if repo.Status != store.StatusReady {
+		t.Errorf("expected foo final status=ready, got %q", repo.Status)
+	}
+
+	// Exactly one IndexLocalPath call should have been recorded for foo.
+	if calls := bi.CallsFor("foo"); len(calls) != 1 {
+		t.Errorf("expected 1 indexer call for foo, got %d", len(calls))
+	}
+
+	// Silence unused-import warning if log is no longer referenced after
+	// future edits. (No-op write.)
+	_ = log.Default()
 }

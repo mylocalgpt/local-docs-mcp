@@ -223,11 +223,12 @@ func (q *indexQueue) dequeue(alias string) bool {
 // available it is taken; otherwise the worker blocks on either lane (or
 // shutdown).
 //
-// run is invoked synchronously per job. Panics inside run are recovered and
-// reported as JobResult.Err. The worker exits cleanly when ctx is cancelled.
-// On shutdown, the caller should invoke drainPending to release any jobs
-// still sitting in the channels or pending map.
-func (q *indexQueue) worker(ctx context.Context, run func(*Job) JobResult) {
+// run is invoked synchronously per job. The worker passes its own ctx so
+// shutdown can interrupt the in-flight indexing call. Panics inside run are
+// recovered and reported as JobResult.Err. The worker exits cleanly when ctx
+// is cancelled. On shutdown, the caller should invoke drainPending to
+// release any jobs still sitting in the channels or pending map.
+func (q *indexQueue) worker(ctx context.Context, run func(context.Context, *Job) JobResult) {
 	for {
 		// Cheap shutdown check first so a steady stream of jobs cannot
 		// starve cancellation.
@@ -241,13 +242,13 @@ func (q *indexQueue) worker(ctx context.Context, run func(*Job) JobResult) {
 		// available. Otherwise block on either lane or shutdown.
 		select {
 		case j := <-q.userJobs:
-			q.handle(j, run)
+			q.handle(ctx, j, run)
 		default:
 			select {
 			case j := <-q.userJobs:
-				q.handle(j, run)
+				q.handle(ctx, j, run)
 			case j := <-q.bgJobs:
-				q.handle(j, run)
+				q.handle(ctx, j, run)
 			case <-ctx.Done():
 				return
 			}
@@ -258,8 +259,9 @@ func (q *indexQueue) worker(ctx context.Context, run func(*Job) JobResult) {
 // handle runs one job. It must be called only from worker (the queue assumes
 // a single consumer). The pointer-equality check protects against orphans
 // (entries that were dequeued or replaced via coalescing while sitting in
-// the channel).
-func (q *indexQueue) handle(j *Job, run func(*Job) JobResult) {
+// the channel). ctx is forwarded to run so the indexer call can be cancelled
+// mid-flight on shutdown.
+func (q *indexQueue) handle(ctx context.Context, j *Job, run func(context.Context, *Job) JobResult) {
 	q.mu.Lock()
 	if q.pending[j.Alias] != j {
 		// Orphan: dequeued or replaced. Skip silently.
@@ -278,7 +280,7 @@ func (q *indexQueue) handle(j *Job, run func(*Job) JobResult) {
 				result = JobResult{Err: fmt.Errorf("panic: %v", r)}
 			}
 		}()
-		result = run(j)
+		result = run(ctx, j)
 	}()
 
 	// Done is buffered size 1, send never blocks.

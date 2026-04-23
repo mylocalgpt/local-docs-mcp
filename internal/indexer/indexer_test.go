@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -98,7 +99,7 @@ func TestIndexRepo(t *testing.T) {
 	}
 
 	// --- First index ---
-	result, err := ix.IndexRepo(repoCfg, false)
+	result, err := ix.IndexRepo(context.Background(), repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo failed: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestIndexRepo(t *testing.T) {
 	}
 
 	// --- Second index (should skip) ---
-	result2, err := ix.IndexRepo(repoCfg, false)
+	result2, err := ix.IndexRepo(context.Background(), repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo (2nd) failed: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestIndexRepo(t *testing.T) {
 	mustGit("add", ".")
 	mustGit("commit", "-m", "add changelog")
 
-	result3, err := ix.IndexRepo(repoCfg, false)
+	result3, err := ix.IndexRepo(context.Background(), repoCfg, false)
 	if err != nil {
 		t.Fatalf("IndexRepo (3rd) failed: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestIndexAll(t *testing.T) {
 		},
 	}
 
-	results, err := ix.IndexAll(cfg, false)
+	results, err := ix.IndexAll(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("IndexAll failed: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestIndexLocalPath(t *testing.T) {
 	}
 	defer ix.Cleanup() //nolint:errcheck
 
-	result, err := ix.IndexLocalPath("local-docs", dir)
+	result, err := ix.IndexLocalPath(context.Background(), "local-docs", dir)
 	if err != nil {
 		t.Fatalf("IndexLocalPath failed: %v", err)
 	}
@@ -328,7 +329,7 @@ func TestIndexLocalPathReindexReplaces(t *testing.T) {
 	defer ix.Cleanup() //nolint:errcheck
 
 	// First index
-	r1, err := ix.IndexLocalPath("local-docs", dir)
+	r1, err := ix.IndexLocalPath(context.Background(), "local-docs", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestIndexLocalPathReindexReplaces(t *testing.T) {
 	firstCount := r1.DocsIndexed
 
 	// Re-index same alias should replace, not duplicate
-	r2, err := ix.IndexLocalPath("local-docs", dir)
+	r2, err := ix.IndexLocalPath(context.Background(), "local-docs", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +370,7 @@ func TestIndexLocalPathNonExistentDir(t *testing.T) {
 	}
 	defer ix.Cleanup() //nolint:errcheck
 
-	_, err = ix.IndexLocalPath("bad", "/nonexistent/path/that/does/not/exist")
+	_, err = ix.IndexLocalPath(context.Background(), "bad", "/nonexistent/path/that/does/not/exist")
 	if err == nil {
 		t.Fatal("expected error for nonexistent directory")
 	}
@@ -393,7 +394,7 @@ func TestIndexLocalPathFileNotDir(t *testing.T) {
 	}
 	defer ix.Cleanup() //nolint:errcheck
 
-	_, err = ix.IndexLocalPath("bad", tmpFile)
+	_, err = ix.IndexLocalPath(context.Background(), "bad", tmpFile)
 	if err == nil {
 		t.Fatal("expected error for file (not directory)")
 	}

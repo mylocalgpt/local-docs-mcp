@@ -77,6 +77,7 @@ The `add_docs` tool returns immediately while indexing runs asynchronously. A si
 - **Coalescing:** a duplicate enqueue for the same repo alias merges into the existing pending job - paths are unioned and the force flag upgrades from false to true.
 - **Capacity:** each lane holds up to 100 pending jobs; over capacity the caller gets a clean error rather than an unbounded wait.
 - **In-memory only:** on restart, pending jobs are dropped and repos revert to their pre-queue status; the next auto-refresh tick picks them up again.
+- **Shutdown cancellation:** the worker's context is propagated through the indexer (including `git` subprocesses), so server shutdown interrupts an in-flight job promptly. The job's prior status is restored with `status_detail = "cancelled at shutdown"` rather than recorded as an error, so the next auto-refresh re-runs it cleanly.
 
 ### Heading-Based Chunking
 
