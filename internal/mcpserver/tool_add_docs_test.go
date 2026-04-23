@@ -29,7 +29,7 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
-		s.Close()
+		s.Close() //nolint:errcheck
 		t.Fatalf("create indexer: %v", err)
 	}
 
@@ -43,8 +43,8 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	_, err = srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		ix.Cleanup() //nolint:errcheck
+		s.Close()    //nolint:errcheck
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -56,15 +56,15 @@ func setupAddDocsTest(t *testing.T) (*mcp.ClientSession, *Server, func()) {
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		ix.Cleanup() //nolint:errcheck
+		s.Close()    //nolint:errcheck
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
 		cancel()
-		ix.Cleanup()
-		s.Close()
+		ix.Cleanup() //nolint:errcheck
+		s.Close()    //nolint:errcheck
 	}
 
 	return clientSession, srv, cleanup

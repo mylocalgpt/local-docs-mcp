@@ -36,7 +36,7 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		s.Close() //nolint:errcheck
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -48,15 +48,15 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		s.Close()
+		s.Close() //nolint:errcheck
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		clientSession.Close()
-		serverSession.Wait()
+		clientSession.Close() //nolint:errcheck
+		serverSession.Wait()  //nolint:errcheck
 		cancel()
-		s.Close()
+		s.Close() //nolint:errcheck
 	}
 
 	return clientSession, serverSession, srv, cleanup
@@ -108,13 +108,13 @@ func TestUpdateDocsRepoNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		t.Fatalf("create indexer: %v", err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	srv.indexer = ix
 
@@ -213,7 +213,7 @@ func TestFormatResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	// Insert a repo so GetRepo works for commit SHA lookup
 	repoID, err := s.UpsertRepo("myrepo", "https://example.com/repo.git", `["docs"]`, "git")
@@ -287,7 +287,7 @@ func TestAutoRefreshStaleDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	// Insert a stale repo (indexed 2 days ago)
 	repoID, err := s.UpsertRepo("stale-repo", "https://example.com/stale.git", `["docs"]`, "git")
@@ -358,7 +358,7 @@ func TestAutoRefreshNilIndexer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	srv := &Server{
 		store:   s,
@@ -380,13 +380,13 @@ func TestAutoRefreshCancelledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close() //nolint:errcheck
 
 	ix, err := indexer.NewIndexer(s)
 	if err != nil {
 		t.Fatalf("create indexer: %v", err)
 	}
-	defer ix.Cleanup()
+	defer ix.Cleanup() //nolint:errcheck
 
 	srv := &Server{
 		store:   s,

@@ -85,6 +85,10 @@ type indexQueue struct {
 
 const queueCapacity = 100
 
+// errQueueFull's text is surfaced verbatim to MCP clients, so it intentionally
+// reads as a complete user-facing sentence rather than a Go-style fragment.
+//
+//nolint:staticcheck // ST1005: user-facing message, capitalisation and punctuation are deliberate
 var errQueueFull = errors.New("Indexing queue is full (100 jobs pending). Try again shortly.")
 
 // newIndexQueue constructs an empty queue with both lanes sized to
