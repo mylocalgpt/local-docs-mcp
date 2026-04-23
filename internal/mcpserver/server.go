@@ -322,7 +322,7 @@ func (s *Server) autoRefresh(ctx context.Context) {
 			RepoID:      repo.ID,
 		}
 
-		_, position, _, _, enqErr := s.queue.enqueue(job)
+		_, _, _, _, enqErr := s.queue.enqueue(job)
 		if enqErr != nil {
 			if errors.Is(enqErr, errQueueFull) {
 				log.Printf("auto-refresh: %s skipped, queue full", repo.Alias)
@@ -333,8 +333,5 @@ func (s *Server) autoRefresh(ctx context.Context) {
 		}
 
 		log.Printf("auto-refresh: queued %s (%s)", repo.Alias, reason)
-		if dbErr := s.store.UpdateRepoStatus(repo.ID, store.StatusQueued, formatQueuedDetail(position)); dbErr != nil {
-			log.Printf("auto-refresh: %s set queued status: %v", repo.Alias, dbErr)
-		}
 	}
 }
