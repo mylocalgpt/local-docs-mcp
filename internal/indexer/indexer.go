@@ -23,11 +23,21 @@ type Indexer struct {
 
 // IndexResult holds the outcome of indexing a single repository.
 type IndexResult struct {
-	Repo        string
-	DocsIndexed int
-	Duration    time.Duration
-	Skipped     bool
-	Error       error
+	Repo          string
+	DocsIndexed   int
+	Duration      time.Duration
+	Skipped       bool
+	Error         error
+	SkippedFiles  int
+	SkippedSample []string
+}
+
+// walkResult is the internal return shape of walkAndChunk. It bundles the
+// chunked documents with bookkeeping about files the decoder rejected.
+type walkResult struct {
+	Docs    []store.Document
+	Skipped int
+	Sample  []string
 }
 
 // NewIndexer creates an Indexer with a temporary working directory for clones.
@@ -112,7 +122,7 @@ func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force b
 	}
 
 	// 6. Walk paths and collect markdown files
-	docs, err := ix.walkAndChunk(ctx, repoDir, cfg.Paths, repoID)
+	wr, err := ix.walkAndChunk(ctx, repoDir, cfg.Paths, repoID)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return result, ctxErr
@@ -121,9 +131,11 @@ func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force b
 		result.Duration = time.Since(start)
 		return result, nil
 	}
+	result.SkippedFiles = wr.Skipped
+	result.SkippedSample = wr.Sample
 
 	// 7. Replace documents atomically
-	if err := ix.store.ReplaceDocuments(repoID, docs); err != nil {
+	if err := ix.store.ReplaceDocuments(repoID, wr.Docs); err != nil {
 		result.Error = fmt.Errorf("replace documents %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
@@ -131,13 +143,13 @@ func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force b
 
 	// 8. Update repo index metadata
 	timestamp := time.Now().UTC().Format(time.RFC3339)
-	if err := ix.store.UpdateRepoIndex(repoID, sha, timestamp, len(docs)); err != nil {
+	if err := ix.store.UpdateRepoIndex(repoID, sha, timestamp, len(wr.Docs)); err != nil {
 		result.Error = fmt.Errorf("update repo index %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
-	result.DocsIndexed = len(docs)
+	result.DocsIndexed = len(wr.Docs)
 	result.Duration = time.Since(start)
 	return result, nil
 }
@@ -146,8 +158,8 @@ func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force b
 // returns chunked markdown documents. When paths is nil or empty, the entire
 // rootDir is walked. The walk callback checks ctx on every entry, so
 // cancellation kicks in within at most one file iteration.
-func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []string, repoID int64) ([]store.Document, error) {
-	var docs []store.Document
+func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []string, repoID int64) (*walkResult, error) {
+	result := &walkResult{}
 
 	walkRoots := []string{rootDir}
 	if len(paths) > 0 {
@@ -159,7 +171,7 @@ func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []str
 
 	for _, walkRoot := range walkRoots {
 		if err := ctx.Err(); err != nil {
-			return docs, err
+			return result, err
 		}
 		err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 			if cerr := ctx.Err(); cerr != nil {
@@ -189,12 +201,22 @@ func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []str
 				return nil
 			}
 
-			chunks := ProcessMarkdownFile(relPath, string(data))
+			decoded, derr := decodeFileContent(data)
+			if derr != nil {
+				log.Printf("warning: cannot decode %s: %v", relPath, derr)
+				result.Skipped++
+				if len(result.Sample) < 5 {
+					result.Sample = append(result.Sample, relPath)
+				}
+				return nil
+			}
+
+			chunks := ProcessMarkdownFile(relPath, decoded)
 			for _, c := range chunks {
 				if len(strings.TrimSpace(c.Content)) < 10 {
 					continue
 				}
-				docs = append(docs, store.Document{
+				result.Docs = append(result.Docs, store.Document{
 					RepoID:       repoID,
 					Path:         relPath,
 					DocTitle:     c.DocTitle,
@@ -209,13 +231,13 @@ func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []str
 		})
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return docs, ctxErr
+				return result, ctxErr
 			}
 			log.Printf("warning: walk failed for %s: %v", walkRoot, err)
 		}
 	}
 
-	return docs, nil
+	return result, nil
 }
 
 // IndexLocalPath indexes markdown files from a local directory. ctx is
@@ -239,7 +261,7 @@ func (ix *Indexer) IndexLocalPath(ctx context.Context, alias, dirPath string) (*
 		return result, nil
 	}
 
-	docs, err := ix.walkAndChunk(ctx, dirPath, nil, repoID)
+	wr, err := ix.walkAndChunk(ctx, dirPath, nil, repoID)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return result, ctxErr
@@ -248,21 +270,23 @@ func (ix *Indexer) IndexLocalPath(ctx context.Context, alias, dirPath string) (*
 		result.Duration = time.Since(start)
 		return result, nil
 	}
+	result.SkippedFiles = wr.Skipped
+	result.SkippedSample = wr.Sample
 
-	if err := ix.store.ReplaceDocuments(repoID, docs); err != nil {
+	if err := ix.store.ReplaceDocuments(repoID, wr.Docs); err != nil {
 		result.Error = fmt.Errorf("replace documents %s: %w", alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
-	if err := ix.store.UpdateRepoIndex(repoID, "", timestamp, len(docs)); err != nil {
+	if err := ix.store.UpdateRepoIndex(repoID, "", timestamp, len(wr.Docs)); err != nil {
 		result.Error = fmt.Errorf("update repo index %s: %w", alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
-	result.DocsIndexed = len(docs)
+	result.DocsIndexed = len(wr.Docs)
 	result.Duration = time.Since(start)
 	return result, nil
 }

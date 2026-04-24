@@ -376,6 +376,50 @@ func TestIndexLocalPathNonExistentDir(t *testing.T) {
 	}
 }
 
+func TestIndexLocalPathSkipsUndecodable(t *testing.T) {
+	dir := t.TempDir()
+
+	// Copy Phase 1 fixtures: utf16le.md (valid) and utf16_truncated.md (truncated).
+	for _, name := range []string{"utf16le.md", "utf16_truncated.md"} {
+		data, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close() //nolint:errcheck
+
+	ix, err := NewIndexer(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Cleanup() //nolint:errcheck
+
+	result, err := ix.IndexLocalPath(context.Background(), "skip-test", dir)
+	if err != nil {
+		t.Fatalf("IndexLocalPath failed: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("IndexLocalPath result error: %v", result.Error)
+	}
+	if result.DocsIndexed == 0 {
+		t.Fatal("expected at least one document from valid utf16le.md")
+	}
+	if result.SkippedFiles != 1 {
+		t.Fatalf("SkippedFiles: got %d, want 1", result.SkippedFiles)
+	}
+	if len(result.SkippedSample) != 1 || result.SkippedSample[0] != "utf16_truncated.md" {
+		t.Fatalf("SkippedSample: got %v, want [utf16_truncated.md]", result.SkippedSample)
+	}
+}
+
 func TestIndexLocalPathFileNotDir(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "file.md")
 	if err := os.WriteFile(tmpFile, []byte("# Test\n"), 0o644); err != nil {
