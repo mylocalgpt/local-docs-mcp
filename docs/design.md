@@ -87,6 +87,25 @@ Markdown files are split at heading boundaries rather than by fixed token count.
 
 On server startup, all repos are checked for staleness. Git repos older than 24 hours are re-indexed (skipped if the commit SHA is unchanged). Local directories are always re-scanned. This keeps documentation current without manual intervention.
 
+### Encoding handling
+
+The indexer accepts UTF-8, UTF-8 with BOM, and UTF-16 LE/BE with BOM. Files
+without a recognised BOM run through `strings.ToValidUTF8`, which drops
+invalid byte sequences (e.g. salvaging the ASCII portion of Windows-1252
+markdown). Files the decoder cannot salvage are skipped at index time and
+counted in `IndexResult.SkippedFiles`; the count and a sample of paths
+surface via `repos.status_detail`, visible through `list_repos`.
+
+On startup, `autoRefresh` runs `RepoHasInvalidEncoding` (a SQL byte-signature
+scan plus a 200-row UTF-8 validity sample) on every git repo. Repos showing
+signs of legacy broken decoding self-heal through the existing queue
+lifecycle.
+
+Known limitations: BOM-less UTF-16 is not detected (heuristics produce false
+positives); sparse invalid-UTF-8 corruption (no BOM, no NUL) past the 200-row
+Pass 2 sample may slip past the scan, with `update_docs` as the manual
+escape hatch; file scope remains `.md` and `.mdx`.
+
 ## Database Schema
 
 Three tables:
