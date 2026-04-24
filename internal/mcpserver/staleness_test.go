@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/mylocalgpt/local-docs-mcp/internal/config"
+	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
 	"github.com/mylocalgpt/local-docs-mcp/internal/search"
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
@@ -69,6 +72,7 @@ func TestStaleness(t *testing.T) {
 		repo       store.Repo
 		wantStale  bool
 		wantReason string
+		wantForce  bool
 	}{
 		{
 			name:       "local source",
@@ -105,17 +109,21 @@ func TestStaleness(t *testing.T) {
 			repo:       store.Repo{ID: brokenID, SourceType: "git", IndexedAt: fresh},
 			wantStale:  true,
 			wantReason: "indexed content contains invalid encoding",
+			wantForce:  true,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotStale, gotReason := srv.staleness(context.Background(), tc.repo)
+			gotStale, gotReason, gotForce := srv.staleness(context.Background(), tc.repo)
 			if gotStale != tc.wantStale {
 				t.Errorf("stale = %v, want %v", gotStale, tc.wantStale)
 			}
 			if gotReason != tc.wantReason {
 				t.Errorf("reason = %q, want %q", gotReason, tc.wantReason)
+			}
+			if gotForce != tc.wantForce {
+				t.Errorf("force = %v, want %v", gotForce, tc.wantForce)
 			}
 		})
 	}
@@ -168,5 +176,153 @@ func TestAutoRefreshEncodingHeal(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "indexed content contains invalid encoding") {
 		t.Errorf("log output missing encoding reason; got: %s", buf.String())
+	}
+}
+
+// healingIndexer is a fake indexer that simulates a real reindex when called
+// with Force=true: it overwrites the repo's documents with clean content.
+// This lets us verify that autoRefresh propagates Force into the job so the
+// real indexer's SHA short-circuit (internal/indexer/indexer.go:94) is bypassed
+// during encoding-heal runs.
+type healingIndexer struct {
+	store     *store.Store
+	mu        sync.Mutex
+	gotForce  []bool
+	cleanText string
+}
+
+func (h *healingIndexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force bool) (*indexer.IndexResult, error) {
+	h.mu.Lock()
+	h.gotForce = append(h.gotForce, force)
+	h.mu.Unlock()
+
+	repo, err := h.store.GetRepo(cfg.Alias)
+	if err != nil {
+		return nil, err
+	}
+	if repo == nil {
+		return &indexer.IndexResult{Repo: cfg.Alias}, nil
+	}
+
+	// Mirror indexer.IndexRepo's SHA short-circuit: when Force is false and
+	// the SHA is unchanged, the indexer returns Skipped without touching
+	// documents. The whole point of this test is that autoRefresh must NOT
+	// hit this branch for encoding heals.
+	if !force {
+		return &indexer.IndexResult{Repo: cfg.Alias, Skipped: true}, nil
+	}
+
+	if err := h.store.ReplaceDocuments(repo.ID, []store.Document{{
+		RepoID:       repo.ID,
+		Path:         "a.md",
+		DocTitle:     "doc",
+		SectionTitle: "section",
+		Content:      h.cleanText,
+		Tokens:       1,
+		HeadingLevel: 1,
+	}}); err != nil {
+		return nil, err
+	}
+	return &indexer.IndexResult{Repo: cfg.Alias, DocsIndexed: 1}, nil
+}
+
+func (h *healingIndexer) IndexLocalPath(ctx context.Context, alias, path string) (*indexer.IndexResult, error) {
+	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1}, nil
+}
+
+// TestAutoRefreshEncodingHealReplacesCorruptRows is the integration guard for
+// the F1 fix. It seeds a git repo whose commit SHA is unchanged but whose
+// indexed rows contain invalid encoding, then drives autoRefresh + the queue
+// worker to completion. Without Force=true on the heal job, the real indexer
+// would short-circuit on the SHA match and the corrupt row would persist.
+func TestAutoRefreshEncodingHealReplacesCorruptRows(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	srv := New(s, search.NewSearch(s), nil, nil)
+	ix := &healingIndexer{store: s, cleanText: "clean hello"}
+	srv.indexer = ix
+
+	const alias = "broken"
+	repoID, err := s.UpsertRepo(alias, "https://example.com/broken", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	fresh := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	if err := s.UpdateRepoIndex(repoID, "deadbeef", fresh, 1); err != nil {
+		t.Fatalf("UpdateRepoIndex: %v", err)
+	}
+	if err := s.UpdateRepoStatus(repoID, store.StatusReady, ""); err != nil {
+		t.Fatalf("UpdateRepoStatus: %v", err)
+	}
+	// Plant a row with a UTF-8 BOM so RepoHasInvalidEncoding flags it.
+	seedDoc(t, s, repoID, "a.md", "\xEF\xBB\xBFhello")
+
+	// Confirm the precondition the heal flow is supposed to fix.
+	invalid, err := s.RepoHasInvalidEncoding(context.Background(), repoID)
+	if err != nil {
+		t.Fatalf("RepoHasInvalidEncoding pre: %v", err)
+	}
+	if !invalid {
+		t.Fatal("expected seeded row to be flagged as invalid encoding")
+	}
+
+	// Run the worker so the enqueued heal job actually executes.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		workerCancel()
+		<-workerDone
+	})
+
+	srv.autoRefresh(context.Background())
+
+	// Wait for the repo to settle back to ready (heal completed).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		repo, err := s.GetRepo(alias)
+		if err != nil {
+			t.Fatalf("GetRepo: %v", err)
+		}
+		if repo != nil && repo.Status == store.StatusReady {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if repo == nil || repo.Status != store.StatusReady {
+		t.Fatalf("expected ready repo after heal, got %+v", repo)
+	}
+
+	// The fix: heal must invoke the indexer with Force=true so the SHA
+	// short-circuit is bypassed. Without F1's fix, gotForce would be [false].
+	ix.mu.Lock()
+	calls := append([]bool(nil), ix.gotForce...)
+	ix.mu.Unlock()
+	if len(calls) == 0 {
+		t.Fatal("indexer was never invoked")
+	}
+	if !calls[0] {
+		t.Errorf("heal job ran with Force=false; corrupt rows would persist (got %v)", calls)
+	}
+
+	// And the corrupt row must actually be gone.
+	stillInvalid, err := s.RepoHasInvalidEncoding(context.Background(), repoID)
+	if err != nil {
+		t.Fatalf("RepoHasInvalidEncoding post: %v", err)
+	}
+	if stillInvalid {
+		t.Error("invalid encoding still present after heal; F1 regression")
 	}
 }

@@ -316,7 +316,7 @@ func (s *Server) autoRefresh(ctx context.Context) {
 			continue
 		}
 
-		stale, reason := s.staleness(ctx, *repo)
+		stale, reason, force := s.staleness(ctx, *repo)
 		if !stale {
 			continue
 		}
@@ -334,7 +334,7 @@ func (s *Server) autoRefresh(ctx context.Context) {
 			Kind:        kindFromSourceType(repo.SourceType),
 			URL:         repo.URL,
 			Paths:       paths,
-			Force:       false,
+			Force:       force,
 			Priority:    priorityBackground,
 			PriorStatus: repo.Status,
 			RepoID:      repo.ID,
@@ -354,30 +354,36 @@ func (s *Server) autoRefresh(ctx context.Context) {
 	}
 }
 
-// staleness reports whether a repo should be re-indexed and a short reason
-// suitable for the auto-refresh log line. Branches are evaluated in order:
-// local source, never indexed, malformed timestamp ("unknown age"), older
-// than 24h, indexed content with invalid encoding. A repo with a recent
-// timestamp and clean encoding returns (false, "").
+// staleness reports whether a repo should be re-indexed, a short reason
+// suitable for the auto-refresh log line, and whether the re-index must run
+// with Force=true. Branches are evaluated in order: local source, never
+// indexed, malformed timestamp ("unknown age"), older than 24h, indexed
+// content with invalid encoding. A repo with a recent timestamp and clean
+// encoding returns (false, "", false).
+//
+// Force is true only for the encoding-invalid branch: the git SHA is
+// unchanged, so indexer.IndexRepo would short-circuit on the SHA check and
+// leave the corrupt rows in place. All other branches re-fetch normally and
+// do not need Force.
 //
 // Errors from RepoHasInvalidEncoding are deliberately swallowed: a failing
 // scan must not block auto-refresh, and the next startup will retry.
-func (s *Server) staleness(ctx context.Context, repo store.Repo) (bool, string) {
+func (s *Server) staleness(ctx context.Context, repo store.Repo) (bool, string, bool) {
 	if repo.SourceType == "local" {
-		return true, "local source"
+		return true, "local source", false
 	}
 	if repo.IndexedAt == "" {
-		return true, "never indexed"
+		return true, "never indexed", false
 	}
 	t, err := time.Parse(time.RFC3339, repo.IndexedAt)
 	if err != nil {
-		return true, "unknown age"
+		return true, "unknown age", false
 	}
 	if time.Since(t) > 24*time.Hour {
-		return true, fmt.Sprintf("last indexed %s", repo.IndexedAt)
+		return true, fmt.Sprintf("last indexed %s", repo.IndexedAt), false
 	}
 	if invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, repo.ID); scanErr == nil && invalid {
-		return true, "indexed content contains invalid encoding"
+		return true, "indexed content contains invalid encoding", true
 	}
-	return false, ""
+	return false, "", false
 }
