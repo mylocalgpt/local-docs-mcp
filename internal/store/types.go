@@ -2,6 +2,7 @@ package store
 
 // Status constants for repo indexing state.
 const (
+	StatusQueued   = "queued"
 	StatusIndexing = "indexing"
 	StatusReady    = "ready"
 	StatusError    = "error"

@@ -72,6 +72,11 @@ func (s *Server) handleListRepos(_ context.Context, _ *mcp.CallToolRequest, _ Li
 // formatRepoStatus returns a human-readable status string for a repo.
 func formatRepoStatus(r *store.Repo) string {
 	switch r.Status {
+	case store.StatusQueued:
+		if r.StatusDetail != "" {
+			return r.StatusDetail
+		}
+		return "queued"
 	case store.StatusIndexing:
 		if r.StatusUpdatedAt != "" {
 			if t, err := time.Parse(time.RFC3339, r.StatusUpdatedAt); err == nil {

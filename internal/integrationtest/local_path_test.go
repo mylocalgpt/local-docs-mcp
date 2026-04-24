@@ -3,6 +3,7 @@
 package integrationtest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,7 +33,7 @@ func TestLocalPathIndexAndSearch(t *testing.T) {
 	}
 	defer ix.Cleanup()
 
-	result, err := ix.IndexLocalPath("local-project", dir)
+	result, err := ix.IndexLocalPath(context.Background(), "local-project", dir)
 	if err != nil {
 		t.Fatalf("IndexLocalPath: %v", err)
 	}

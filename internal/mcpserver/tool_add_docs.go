@@ -3,13 +3,13 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/mylocalgpt/local-docs-mcp/internal/config"
 	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
@@ -26,7 +26,7 @@ type AddDocsInput struct {
 func (s *Server) registerAddDocsTool() {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "add_docs",
-		Description: "Add documentation from a git repo or local directory. For git repos, provide the git repo URL and specific doc subdirectory paths (e.g. [\"docs/guide/\"]). For local directories, provide the absolute filesystem path (ask the user if unknown). Indexing runs in the background; use list_repos to check status.",
+		Description: "Add documentation from a git repo or local directory. For git repos, provide the GitHub URL and specific doc subdirectory paths (e.g. [\"docs/guide/\"]). For local directories, provide the absolute filesystem path (ask the user if unknown). Indexing runs in the background; use list_repos to check status.",
 	}, s.handleAddDocs)
 }
 
@@ -70,7 +70,9 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 	if err != nil {
 		return nil, nil, fmt.Errorf("checking existing repo: %w", err)
 	}
+	priorStatus := ""
 	if existing != nil {
+		priorStatus = existing.Status
 		var existingPaths []string
 		if err := json.Unmarshal([]byte(existing.Paths), &existingPaths); err != nil {
 			existingPaths = nil
@@ -90,55 +92,33 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		return nil, nil, fmt.Errorf("upsert repo: %w", err)
 	}
 
-	// Acquire mutex before setting status to avoid leaving repo in indexing
-	// state if the lock cannot be acquired.
-	if !s.indexMu.TryLock() {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{
-				Text: "Indexing already in progress, try again shortly.",
-			}},
-		}, nil, nil
+	job := &Job{
+		Alias:       input.Alias,
+		Kind:        jobKindGit,
+		URL:         *input.URL,
+		Paths:       mergedPaths,
+		Force:       true,
+		Priority:    priorityUser,
+		PriorStatus: priorStatus,
+		RepoID:      repoID,
 	}
 
-	if err := s.store.UpdateRepoStatus(repoID, store.StatusIndexing, "clone started"); err != nil {
-		s.indexMu.Unlock()
-		return nil, nil, fmt.Errorf("set status: %w", err)
+	_, position, coalesced, pathsChanged, enqErr := s.queue.enqueue(job)
+	if enqErr != nil {
+		if errors.Is(enqErr, errQueueFull) {
+			if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusError, "indexing queue full, retry later"); dbErr != nil {
+				log.Printf("add_docs: %s set queue-full status: %v", input.Alias, dbErr)
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: enqErr.Error()}},
+			}, nil, nil
+		}
+		return nil, nil, fmt.Errorf("enqueue: %w", enqErr)
 	}
 
-	// Launch background indexing. Lock is acquired in the handler and
-	// released in the goroutine (valid cross-goroutine mutex transfer).
-	go func() {
-		defer s.indexMu.Unlock()
-
-		cfg := config.RepoConfig{Alias: input.Alias, URL: *input.URL, Paths: mergedPaths}
-		result, err := s.indexer.IndexRepo(cfg, true)
-		if err != nil {
-			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
-			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
-			return
-		}
-		if result.Error != nil {
-			log.Printf("add_docs: %s indexing error: %v", input.Alias, result.Error)
-			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
-			return
-		}
-
-		_ = s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
-		if err := s.store.RebuildFTS(); err != nil {
-			log.Printf("add_docs: rebuild fts failed: %v", err)
-		}
-		log.Printf("add_docs: %s indexed %d docs in %s", input.Alias, result.DocsIndexed, result.Duration)
-	}()
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Adding git documentation source:\n")
-	fmt.Fprintf(&b, "  Alias: %s\n", input.Alias)
-	fmt.Fprintf(&b, "  URL: %s\n", *input.URL)
-	fmt.Fprintf(&b, "  Paths: %s\n", strings.Join(mergedPaths, ", "))
-	fmt.Fprintf(&b, "\nIndexing started in the background. Use list_repos to check progress.")
-
+	msg := addDocsResponse(input.Alias, *input.URL, mergedPaths, position, coalesced, pathsChanged, false)
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},
+		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
 	}, nil, nil
 }
 
@@ -152,56 +132,79 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 		return nil, nil, fmt.Errorf("path %q is not a directory", *input.Path)
 	}
 
+	// Look up existing repo so we can capture PriorStatus for shutdown-revert.
+	existing, err := s.store.GetRepo(input.Alias)
+	if err != nil {
+		return nil, nil, fmt.Errorf("checking existing repo: %w", err)
+	}
+	priorStatus := ""
+	if existing != nil {
+		priorStatus = existing.Status
+	}
+
 	repoID, err := s.store.UpsertRepo(input.Alias, *input.Path, "[]", "local")
 	if err != nil {
 		return nil, nil, fmt.Errorf("upsert repo: %w", err)
 	}
 
-	// Acquire mutex before setting status.
-	if !s.indexMu.TryLock() {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{
-				Text: "Indexing already in progress, try again shortly.",
-			}},
-		}, nil, nil
+	job := &Job{
+		Alias:       input.Alias,
+		Kind:        jobKindLocal,
+		URL:         *input.Path,
+		Paths:       nil,
+		Force:       true,
+		Priority:    priorityUser,
+		PriorStatus: priorStatus,
+		RepoID:      repoID,
 	}
 
-	if err := s.store.UpdateRepoStatus(repoID, store.StatusIndexing, "scanning directory"); err != nil {
-		s.indexMu.Unlock()
-		return nil, nil, fmt.Errorf("set status: %w", err)
+	_, position, coalesced, pathsChanged, enqErr := s.queue.enqueue(job)
+	if enqErr != nil {
+		if errors.Is(enqErr, errQueueFull) {
+			if dbErr := s.store.UpdateRepoStatus(repoID, store.StatusError, "indexing queue full, retry later"); dbErr != nil {
+				log.Printf("add_docs: %s set queue-full status: %v", input.Alias, dbErr)
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: enqErr.Error()}},
+			}, nil, nil
+		}
+		return nil, nil, fmt.Errorf("enqueue: %w", enqErr)
 	}
 
-	// Launch background indexing. Lock is acquired in the handler and
-	// released in the goroutine (valid cross-goroutine mutex transfer).
-	go func() {
-		defer s.indexMu.Unlock()
-
-		result, err := s.indexer.IndexLocalPath(input.Alias, *input.Path)
-		if err != nil {
-			log.Printf("add_docs: %s indexing failed: %v", input.Alias, err)
-			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, err.Error())
-			return
-		}
-		if result.Error != nil {
-			log.Printf("add_docs: %s indexing error: %v", input.Alias, result.Error)
-			_ = s.store.UpdateRepoStatus(repoID, store.StatusError, result.Error.Error())
-			return
-		}
-
-		_ = s.store.UpdateRepoStatus(repoID, store.StatusReady, "")
-		if err := s.store.RebuildFTS(); err != nil {
-			log.Printf("add_docs: rebuild fts failed: %v", err)
-		}
-		log.Printf("add_docs: %s indexed %d docs in %s", input.Alias, result.DocsIndexed, result.Duration)
-	}()
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Adding local documentation source:\n")
-	fmt.Fprintf(&b, "  Alias: %s\n", input.Alias)
-	fmt.Fprintf(&b, "  Path: %s\n", *input.Path)
-	fmt.Fprintf(&b, "\nIndexing started in the background. Use list_repos to check progress.")
-
+	msg := addDocsResponse(input.Alias, *input.Path, nil, position, coalesced, pathsChanged, true)
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: b.String()}},
+		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
 	}, nil, nil
+}
+
+// addDocsResponse builds the human-readable message returned to the MCP
+// client. The wording differs based on whether the request started a fresh
+// queue entry or coalesced into an existing one.
+func addDocsResponse(alias, source string, paths []string, position int, coalesced, pathsChanged, isLocal bool) string {
+	var b strings.Builder
+	if isLocal {
+		fmt.Fprintf(&b, "Adding local documentation source:\n")
+		fmt.Fprintf(&b, "  Alias: %s\n", alias)
+		fmt.Fprintf(&b, "  Path: %s\n", source)
+	} else {
+		fmt.Fprintf(&b, "Adding git documentation source:\n")
+		fmt.Fprintf(&b, "  Alias: %s\n", alias)
+		fmt.Fprintf(&b, "  URL: %s\n", source)
+		fmt.Fprintf(&b, "  Paths: %s\n", strings.Join(paths, ", "))
+	}
+	b.WriteString("\n")
+
+	switch {
+	case !coalesced:
+		fmt.Fprintf(&b, "Queued for indexing (~%d ahead). Use list_repos to check progress.", position)
+	case pathsChanged:
+		fmt.Fprintf(&b, "Already queued (~%d ahead); your paths have been merged into the pending job.", position)
+	default:
+		if isLocal {
+			fmt.Fprintf(&b, "Already queued (~%d ahead); folder will be re-scanned automatically.", position)
+		} else {
+			fmt.Fprintf(&b, "Paths already queued (~%d ahead); repo will be re-fetched and re-indexed automatically.", position)
+		}
+	}
+	return b.String()
 }

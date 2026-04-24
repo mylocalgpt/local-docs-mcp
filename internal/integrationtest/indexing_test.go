@@ -3,6 +3,7 @@
 package integrationtest
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("load config: %v", err)
 	}
 	for _, repo := range cfg.Repos {
-		result, err := ix.IndexRepo(repo, false)
+		result, err := ix.IndexRepo(context.Background(), repo, false)
 		if err != nil {
 			log.Fatalf("index %s: %v", repo.Alias, err)
 		}

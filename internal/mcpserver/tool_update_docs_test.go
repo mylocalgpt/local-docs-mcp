@@ -36,7 +36,7 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	serverSession, err := srv.MCPServer().Connect(ctx, st, nil)
 	if err != nil {
 		cancel()
-		_ = s.Close()
+		s.Close() //nolint:errcheck
 		t.Fatalf("server connect: %v", err)
 	}
 
@@ -48,15 +48,15 @@ func setupUpdateTest(t *testing.T, cfg *config.Config) (*mcp.ClientSession, *mcp
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		cancel()
-		_ = s.Close()
+		s.Close() //nolint:errcheck
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		_ = clientSession.Close()
-		_ = serverSession.Wait()
+		clientSession.Close() //nolint:errcheck
+		serverSession.Wait()  //nolint:errcheck
 		cancel()
-		_ = s.Close()
+		s.Close() //nolint:errcheck
 	}
 
 	return clientSession, serverSession, srv, cleanup
@@ -142,56 +142,70 @@ func TestUpdateDocsRepoNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateDocsConcurrencyGuard(t *testing.T) {
-	cfg := &config.Config{Repos: []config.RepoConfig{
-		{URL: "https://example.com/repo.git", Paths: []string{"docs"}, Alias: "test"},
-	}}
+func TestUpdateDocsWaitsForRunningJob(t *testing.T) {
+	cfg := &config.Config{Repos: []config.RepoConfig{}}
 
 	cs, _, srv, cleanup := setupUpdateTest(t, cfg)
 	defer cleanup()
 
-	// Lock the mutex before calling update_docs to simulate an in-progress index
-	srv.indexMu.Lock()
-
-	// Set a non-nil indexer
-	s, err := store.NewStore(":memory:")
-	if err != nil {
-		t.Fatalf("create temp store: %v", err)
-	}
-	defer s.Close() //nolint:errcheck
-
-	ix, err := indexer.NewIndexer(s)
-	if err != nil {
-		t.Fatalf("create indexer: %v", err)
-	}
-	defer ix.Cleanup() //nolint:errcheck
-
-	srv.indexer = ix
-
-	result, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "update_docs",
-		Arguments: map[string]any{},
-	})
-	if err != nil {
-		t.Fatalf("call tool: %v", err)
+	// Pre-populate a repo so update_docs has something to enqueue.
+	if _, err := srv.store.UpsertRepo("test", "https://example.com/repo.git", `["docs"]`, "git"); err != nil {
+		t.Fatalf("upsert repo: %v", err)
 	}
 
-	// Should NOT be an error - just a friendly message
-	if result.IsError {
-		t.Fatal("expected IsError=false for concurrency guard")
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	// Block the alias once so the worker pauses inside IndexRepo. update_docs
+	// is supposed to wait for that to finish, then report its own result.
+	release := bi.Block("test")
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
+
+	resultCh := make(chan *mcp.CallToolResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "update_docs",
+			Arguments: map[string]any{},
+		})
+		resultCh <- r
+		errCh <- e
+	}()
+
+	// Give the call time to enqueue and start running.
+	time.Sleep(50 * time.Millisecond)
+
+	// Confirm it hasn't returned yet.
+	select {
+	case <-resultCh:
+		t.Fatal("update_docs returned before its job was unblocked")
+	default:
 	}
 
-	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
+	close(release)
 
-	if !strings.Contains(text.Text, "already in progress") {
-		t.Errorf("expected 'already in progress' message, got: %s", text.Text)
+	select {
+	case r := <-resultCh:
+		err := <-errCh
+		if err != nil {
+			t.Fatalf("update_docs: %v", err)
+		}
+		if r.IsError {
+			t.Fatalf("update_docs IsError=true; got %s", r.Content[0].(*mcp.TextContent).Text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("update_docs never returned after job was unblocked")
 	}
-
-	// Unlock so cleanup can proceed
-	srv.indexMu.Unlock()
 }
 
 func TestFormatResult(t *testing.T) {
@@ -387,4 +401,236 @@ func TestAutoRefreshCancelledContext(t *testing.T) {
 
 	// Should return quickly without attempting any indexing
 	srv.autoRefresh(ctx)
+}
+
+// TestUpdateSingleRepoCancelRevertsStatus verifies that cancelling the
+// caller's ctx while the repo is still queued behind another job dequeues
+// the pending entry AND reverts the repo's DB status from queued back to
+// its prior status. Without the revert the repo would strand in
+// StatusQueued for the lifetime of the process (autoRefresh skips queued).
+func TestUpdateSingleRepoCancelRevertsStatus(t *testing.T) {
+	cs, _, srv, cleanup := setupUpdateTest(t, nil)
+	defer cleanup()
+
+	const seedAlias = "seed"
+	const targetAlias = "alpha"
+
+	if _, err := srv.store.UpsertRepo(seedAlias, "https://example.com/seed", `["docs"]`, "git"); err != nil {
+		t.Fatalf("upsert seed: %v", err)
+	}
+	if _, err := srv.store.UpsertRepo(targetAlias, "https://example.com/alpha", `["docs"]`, "git"); err != nil {
+		t.Fatalf("upsert alpha: %v", err)
+	}
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+	releaseSeed := bi.Block(seedAlias)
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
+
+	// Occupy the worker with the seed job so alpha will sit in the queue.
+	seedRepo, err := srv.store.GetRepo(seedAlias)
+	if err != nil || seedRepo == nil {
+		t.Fatalf("get seed: %v / %v", seedRepo, err)
+	}
+	seedJob, err := buildJobFromRepo(seedRepo, priorityUser)
+	if err != nil {
+		t.Fatalf("build seed job: %v", err)
+	}
+	if _, _, _, _, err := srv.queue.enqueue(seedJob); err != nil {
+		t.Fatalf("enqueue seed: %v", err)
+	}
+
+	// Wait until the worker is inside the seed call.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.CallsFor(seedAlias)) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := len(bi.CallsFor(seedAlias)); got != 1 {
+		t.Fatalf("expected seed in flight, got %d calls", got)
+	}
+
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := cs.CallTool(callCtx, &mcp.CallToolParams{
+			Name:      "update_docs",
+			Arguments: map[string]any{"repo": targetAlias},
+		})
+		callDone <- err
+	}()
+
+	// Give alpha time to enqueue.
+	time.Sleep(100 * time.Millisecond)
+
+	// Best-effort: alpha should sit in StatusQueued mid-flight. Inherently
+	// racy on slow CI; log only.
+	if r, _ := srv.store.GetRepo(targetAlias); r != nil && r.Status != store.StatusQueued {
+		t.Logf("alpha mid-flight status = %q (expected queued; racy assertion)", r.Status)
+	}
+
+	cancelCall()
+
+	select {
+	case <-callDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("update_docs did not return after cancel")
+	}
+
+	// Server-side handler may complete the dequeue+revert AFTER the SDK
+	// returns ctx.Err to the client, so poll briefly for the revert to land.
+	var r *store.Repo
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err = srv.store.GetRepo(targetAlias)
+		if err == nil && r != nil && r.Status != store.StatusQueued {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("get alpha: %v", err)
+	}
+	if r == nil {
+		t.Fatal("alpha repo missing after cancel")
+	}
+	if r.Status != store.StatusReady {
+		t.Errorf("alpha status after cancel = %q, want %q", r.Status, store.StatusReady)
+	}
+	if r.StatusDetail != "" {
+		t.Errorf("alpha status_detail after cancel = %q, want empty", r.StatusDetail)
+	}
+
+	// Cleanup so the worker can exit.
+	close(releaseSeed)
+}
+
+// TestUpdateAllReposCancelRevertsAllPending verifies that cancelling
+// updateAllRepos mid-flight reverts every still-queued repo (covers both
+// the early-skip and ctx-done branches in the result-collection loop).
+func TestUpdateAllReposCancelRevertsAllPending(t *testing.T) {
+	cs, _, srv, cleanup := setupUpdateTest(t, nil)
+	defer cleanup()
+
+	const seedAlias = "seed"
+	for _, alias := range []string{seedAlias, "a", "b", "c"} {
+		if _, err := srv.store.UpsertRepo(alias, "https://example.com/"+alias, `["docs"]`, "git"); err != nil {
+			t.Fatalf("upsert %s: %v", alias, err)
+		}
+	}
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+	releaseSeed := bi.Block(seedAlias)
+	releaseA := bi.Block("a")
+	releaseB := bi.Block("b")
+	releaseC := bi.Block("c")
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	defer func() {
+		workerCancel()
+		<-workerDone
+	}()
+
+	seedRepo, err := srv.store.GetRepo(seedAlias)
+	if err != nil || seedRepo == nil {
+		t.Fatalf("get seed: %v / %v", seedRepo, err)
+	}
+	seedJob, err := buildJobFromRepo(seedRepo, priorityUser)
+	if err != nil {
+		t.Fatalf("build seed job: %v", err)
+	}
+	if _, _, _, _, err := srv.queue.enqueue(seedJob); err != nil {
+		t.Fatalf("enqueue seed: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bi.CallsFor(seedAlias)) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := cs.CallTool(callCtx, &mcp.CallToolParams{
+			Name:      "update_docs",
+			Arguments: map[string]any{},
+		})
+		callDone <- err
+	}()
+
+	// Give a/b/c time to enqueue.
+	time.Sleep(150 * time.Millisecond)
+
+	for _, alias := range []string{"a", "b", "c"} {
+		if r, _ := srv.store.GetRepo(alias); r != nil && r.Status != store.StatusQueued {
+			t.Logf("%s mid-flight status = %q (expected queued; racy)", alias, r.Status)
+		}
+	}
+
+	cancelCall()
+
+	select {
+	case <-callDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("update_docs did not return after cancel")
+	}
+
+	// Poll: server-side cancel branch may finish reverting after the SDK
+	// returns ctx.Err to the client.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		allReady := true
+		for _, alias := range []string{"a", "b", "c"} {
+			r, _ := srv.store.GetRepo(alias)
+			if r == nil || r.Status == store.StatusQueued {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	for _, alias := range []string{"a", "b", "c"} {
+		r, err := srv.store.GetRepo(alias)
+		if err != nil {
+			t.Fatalf("get %s: %v", alias, err)
+		}
+		if r == nil {
+			t.Fatalf("%s repo missing after cancel", alias)
+		}
+		if r.Status != store.StatusReady {
+			t.Errorf("%s status after cancel = %q, want %q", alias, r.Status, store.StatusReady)
+		}
+		if r.StatusDetail != "" {
+			t.Errorf("%s status_detail after cancel = %q, want empty", alias, r.StatusDetail)
+		}
+	}
+
+	close(releaseSeed)
+	close(releaseA)
+	close(releaseB)
+	close(releaseC)
 }

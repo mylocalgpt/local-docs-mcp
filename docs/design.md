@@ -53,7 +53,7 @@ FTS5 query execution with BM25 ranking. Implements token budgeting to fit result
 
 ### `internal/mcpserver`
 
-MCP protocol server over stdio. Registers six tools (search_docs, list_repos, browse_docs, update_docs, add_docs, remove_docs). Each tool is defined in its own `tool_*.go` file. The `add_docs` handler launches background indexing goroutines protected by a mutex. Auto-refresh checks repo staleness on server startup and re-indexes as needed. Config repo seeding inserts config-defined repos into the database on first run.
+MCP protocol server over stdio. Registers six tools (search_docs, list_repos, browse_docs, update_docs, add_docs, remove_docs). Each tool is defined in its own `tool_*.go` file. Indexing requests from `add_docs`, `update_docs`, and auto-refresh are funneled through an in-memory job queue drained by a single worker goroutine, with a user lane that takes priority over background work. Auto-refresh checks repo staleness on server startup and enqueues stale repos as needed. Config repo seeding inserts config-defined repos into the database on first run.
 
 ### `internal/config`
 
@@ -71,7 +71,13 @@ Minimizes bandwidth and disk usage for large repositories. Only the specified do
 
 ### Background Indexing
 
-The `add_docs` tool returns immediately while indexing runs in a goroutine. This keeps the AI conversation flowing - the agent can check progress via `list_repos` and search once indexing completes. A mutex ensures only one indexing operation runs at a time. Status is tracked in the `repos` table (indexing, ready, error).
+The `add_docs` tool returns immediately while indexing runs asynchronously. A single worker goroutine drains an in-memory job queue, so the AI conversation keeps flowing and the agent can check progress via `list_repos`. Status is tracked in the `repos` table, with `queued` joining the existing `indexing`, `ready`, and `error` values (no schema migration).
+
+- **Two priority lanes:** user calls (`add_docs`, `update_docs`) drain before background auto-refresh, so startup refresh never blocks an interactive request.
+- **Coalescing:** a duplicate enqueue for the same repo alias merges into the existing pending job - paths are unioned and the force flag upgrades from false to true.
+- **Capacity:** each lane holds up to 100 pending jobs; over capacity the caller gets a clean error rather than an unbounded wait.
+- **In-memory only:** on restart, pending jobs are dropped and repos revert to their pre-queue status; the next auto-refresh tick picks them up again.
+- **Shutdown cancellation:** the worker's context is propagated through the indexer (including `git` subprocesses), so server shutdown interrupts an in-flight job promptly. The job's prior status is restored with `status_detail = "cancelled at shutdown"` rather than recorded as an error, so the next auto-refresh re-runs it cleanly.
 
 ### Heading-Based Chunking
 

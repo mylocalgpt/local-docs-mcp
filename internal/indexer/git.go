@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -8,9 +9,10 @@ import (
 )
 
 // runGit executes the git binary with the given arguments. It returns
-// trimmed stdout on success and an error wrapping stderr on failure.
-func runGit(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// trimmed stdout on success and an error wrapping stderr on failure. ctx is
+// passed to exec.CommandContext so cancellation kills the underlying process.
+func runGit(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -22,8 +24,10 @@ func runGit(args ...string) (string, error) {
 }
 
 // CheckGitVersion verifies that git is installed and at least version 2.25.0.
+// Uses context.Background because the version check is a one-shot startup
+// gate with no caller-provided context.
 func CheckGitVersion() error {
-	out, err := runGit("--version")
+	out, err := runGit(context.Background(), "--version")
 	if err != nil {
 		return fmt.Errorf("git not found: %w", err)
 	}
@@ -57,8 +61,8 @@ func CheckGitVersion() error {
 
 // CloneNoCheckout performs a shallow, blobless clone without checking out files.
 // This allows inspecting the commit SHA before materializing any file content.
-func CloneNoCheckout(repoURL, destDir string) error {
-	_, err := runGit("clone", "--no-checkout", "--depth", "1", "--filter=blob:none", "--", repoURL, destDir)
+func CloneNoCheckout(ctx context.Context, repoURL, destDir string) error {
+	_, err := runGit(ctx, "clone", "--no-checkout", "--depth", "1", "--filter=blob:none", "--", repoURL, destDir)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
@@ -67,13 +71,13 @@ func CloneNoCheckout(repoURL, destDir string) error {
 
 // SparseCheckoutAndCheckout sets the sparse-checkout paths and then checks out
 // the working tree. Call this after CloneNoCheckout.
-func SparseCheckoutAndCheckout(repoDir string, paths []string) error {
+func SparseCheckoutAndCheckout(ctx context.Context, repoDir string, paths []string) error {
 	args := append([]string{"-C", repoDir, "sparse-checkout", "set"}, paths...)
-	if _, err := runGit(args...); err != nil {
+	if _, err := runGit(ctx, args...); err != nil {
 		return fmt.Errorf("sparse-checkout: %w", err)
 	}
 
-	if _, err := runGit("-C", repoDir, "checkout"); err != nil {
+	if _, err := runGit(ctx, "-C", repoDir, "checkout"); err != nil {
 		return fmt.Errorf("checkout: %w", err)
 	}
 	return nil
@@ -81,16 +85,16 @@ func SparseCheckoutAndCheckout(repoDir string, paths []string) error {
 
 // CloneDocFolders clones a repo and checks out only the specified paths.
 // It is a convenience wrapper around CloneNoCheckout + SparseCheckoutAndCheckout.
-func CloneDocFolders(repoURL, destDir string, paths []string) error {
-	if err := CloneNoCheckout(repoURL, destDir); err != nil {
+func CloneDocFolders(ctx context.Context, repoURL, destDir string, paths []string) error {
+	if err := CloneNoCheckout(ctx, repoURL, destDir); err != nil {
 		return err
 	}
-	return SparseCheckoutAndCheckout(destDir, paths)
+	return SparseCheckoutAndCheckout(ctx, destDir, paths)
 }
 
 // GetCommitSHA returns the 40-character hex SHA of HEAD for the repo at repoDir.
-func GetCommitSHA(repoDir string) (string, error) {
-	out, err := runGit("-C", repoDir, "rev-parse", "HEAD")
+func GetCommitSHA(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, "-C", repoDir, "rev-parse", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("rev-parse: %w", err)
 	}

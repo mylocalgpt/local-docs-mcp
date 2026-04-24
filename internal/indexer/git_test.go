@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -59,7 +60,7 @@ func initTestRepo(t *testing.T) string {
 // runGitInDir is a test helper that runs git with -C <dir> prepended.
 func runGitInDir(dir string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", dir}, args...)
-	return runGit(fullArgs...)
+	return runGit(context.Background(), fullArgs...)
 }
 
 func TestCheckGitVersion(t *testing.T) {
@@ -72,7 +73,7 @@ func TestCloneDocFolders(t *testing.T) {
 	origin := initTestRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone")
 
-	if err := CloneDocFolders(origin, dest, []string{"docs"}); err != nil {
+	if err := CloneDocFolders(context.Background(), origin, dest, []string{"docs"}); err != nil {
 		t.Fatalf("CloneDocFolders: %v", err)
 	}
 
@@ -90,7 +91,7 @@ func TestCloneDocFolders(t *testing.T) {
 func TestGetCommitSHA(t *testing.T) {
 	repo := initTestRepo(t)
 
-	sha, err := GetCommitSHA(repo)
+	sha, err := GetCommitSHA(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("GetCommitSHA: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "clone2")
 
 	// Step 1: clone without checkout
-	if err := CloneNoCheckout(origin, dest); err != nil {
+	if err := CloneNoCheckout(context.Background(), origin, dest); err != nil {
 		t.Fatalf("CloneNoCheckout: %v", err)
 	}
 
@@ -116,7 +117,7 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 	}
 
 	// Can still read SHA from the bare-ish clone
-	sha, err := GetCommitSHA(dest)
+	sha, err := GetCommitSHA(context.Background(), dest)
 	if err != nil {
 		t.Fatalf("GetCommitSHA after CloneNoCheckout: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 	}
 
 	// Step 2: sparse checkout + checkout
-	if err := SparseCheckoutAndCheckout(dest, []string{"docs"}); err != nil {
+	if err := SparseCheckoutAndCheckout(context.Background(), dest, []string{"docs"}); err != nil {
 		t.Fatalf("SparseCheckoutAndCheckout: %v", err)
 	}
 
@@ -143,7 +144,7 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 
 func TestInvalidRepoURL(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "bad-clone")
-	err := CloneDocFolders("https://invalid.example.com/no-such-repo.git", dest, []string{"docs"})
+	err := CloneDocFolders(context.Background(), "https://invalid.example.com/no-such-repo.git", dest, []string{"docs"})
 	if err == nil {
 		t.Fatal("expected error for invalid repo URL")
 	}

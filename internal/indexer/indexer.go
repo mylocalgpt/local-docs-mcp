@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -40,7 +41,12 @@ func NewIndexer(s *store.Store) (*Indexer, error) {
 
 // IndexRepo runs the full indexing pipeline for a single repository config.
 // When force is true, the repo is re-indexed even if the SHA hasn't changed.
-func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, error) {
+//
+// Cancellation: ctx is forwarded to git invocations and the markdown walker.
+// On cancel, the function returns the ctx error promptly. The deferred
+// os.RemoveAll(repoDir) cleans up any partial clone, so cancelling mid-run
+// leaves no on-disk residue.
+func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force bool) (*IndexResult, error) {
 	start := time.Now()
 	result := &IndexResult{Repo: cfg.Alias}
 
@@ -48,15 +54,21 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 	defer os.RemoveAll(repoDir) //nolint:errcheck
 
 	// 1. Clone without checkout
-	if err := CloneNoCheckout(cfg.URL, repoDir); err != nil {
+	if err := CloneNoCheckout(ctx, cfg.URL, repoDir); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, ctxErr
+		}
 		result.Error = fmt.Errorf("clone %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
 	// 2. Get HEAD SHA
-	sha, err := GetCommitSHA(repoDir)
+	sha, err := GetCommitSHA(ctx, repoDir)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, ctxErr
+		}
 		result.Error = fmt.Errorf("get sha %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
@@ -90,15 +102,21 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 	}
 
 	// 5. Sparse checkout the specified paths
-	if err := SparseCheckoutAndCheckout(repoDir, cfg.Paths); err != nil {
+	if err := SparseCheckoutAndCheckout(ctx, repoDir, cfg.Paths); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, ctxErr
+		}
 		result.Error = fmt.Errorf("sparse checkout %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
 	// 6. Walk paths and collect markdown files
-	docs, err := ix.walkAndChunk(repoDir, cfg.Paths, repoID)
+	docs, err := ix.walkAndChunk(ctx, repoDir, cfg.Paths, repoID)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, ctxErr
+		}
 		result.Error = fmt.Errorf("walk %s: %w", cfg.Alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
@@ -126,8 +144,9 @@ func (ix *Indexer) IndexRepo(cfg config.RepoConfig, force bool) (*IndexResult, e
 
 // walkAndChunk walks the given rootDir (optionally filtered by paths) and
 // returns chunked markdown documents. When paths is nil or empty, the entire
-// rootDir is walked.
-func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([]store.Document, error) {
+// rootDir is walked. The walk callback checks ctx on every entry, so
+// cancellation kicks in within at most one file iteration.
+func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []string, repoID int64) ([]store.Document, error) {
 	var docs []store.Document
 
 	walkRoots := []string{rootDir}
@@ -139,7 +158,13 @@ func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([
 	}
 
 	for _, walkRoot := range walkRoots {
+		if err := ctx.Err(); err != nil {
+			return docs, err
+		}
 		err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
 			if err != nil {
 				log.Printf("warning: walk error at %s: %v", path, err)
 				return nil
@@ -183,6 +208,9 @@ func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([
 			return nil
 		})
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return docs, ctxErr
+			}
 			log.Printf("warning: walk failed for %s: %v", walkRoot, err)
 		}
 	}
@@ -190,8 +218,9 @@ func (ix *Indexer) walkAndChunk(rootDir string, paths []string, repoID int64) ([
 	return docs, nil
 }
 
-// IndexLocalPath indexes markdown files from a local directory.
-func (ix *Indexer) IndexLocalPath(alias, dirPath string) (*IndexResult, error) {
+// IndexLocalPath indexes markdown files from a local directory. ctx is
+// forwarded to the walker; on cancel the function returns the ctx error.
+func (ix *Indexer) IndexLocalPath(ctx context.Context, alias, dirPath string) (*IndexResult, error) {
 	start := time.Now()
 	result := &IndexResult{Repo: alias}
 
@@ -210,8 +239,11 @@ func (ix *Indexer) IndexLocalPath(alias, dirPath string) (*IndexResult, error) {
 		return result, nil
 	}
 
-	docs, err := ix.walkAndChunk(dirPath, nil, repoID)
+	docs, err := ix.walkAndChunk(ctx, dirPath, nil, repoID)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, ctxErr
+		}
 		result.Error = fmt.Errorf("walk %s: %w", alias, err)
 		result.Duration = time.Since(start)
 		return result, nil
@@ -236,11 +268,16 @@ func (ix *Indexer) IndexLocalPath(alias, dirPath string) (*IndexResult, error) {
 }
 
 // IndexAll indexes all repositories from the config and rebuilds FTS afterward.
-// When force is true, all repos are re-indexed regardless of SHA.
-func (ix *Indexer) IndexAll(cfg *config.Config, force bool) ([]IndexResult, error) {
+// When force is true, all repos are re-indexed regardless of SHA. ctx is
+// checked between repo iterations and forwarded to each IndexRepo call so a
+// long-running batch can be aborted promptly.
+func (ix *Indexer) IndexAll(ctx context.Context, cfg *config.Config, force bool) ([]IndexResult, error) {
 	var results []IndexResult
 	for _, repo := range cfg.Repos {
-		r, err := ix.IndexRepo(repo, force)
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
+		r, err := ix.IndexRepo(ctx, repo, force)
 		if err != nil {
 			results = append(results, IndexResult{
 				Repo:  repo.Alias,
