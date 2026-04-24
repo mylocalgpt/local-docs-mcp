@@ -21,6 +21,7 @@ import (
 // a search for a word from the file must return at least one result.
 func TestEncodingRegressionUTF16LEBOM(t *testing.T) {
 	cs, srv, cleanup := setupAddDocsTest(t)
+	defer cleanup()
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "hello.md"), encodeUTF16LEWithBOM("# Hello\nworld\n"), 0o644); err != nil {
@@ -59,8 +60,6 @@ func TestEncodingRegressionUTF16LEBOM(t *testing.T) {
 
 	workerCancel()
 	<-workerDone
-
-	defer cleanup()
 
 	repo, err := srv.store.GetRepo("encoding-regression")
 	if err != nil {
