@@ -316,27 +316,7 @@ func (s *Server) autoRefresh(ctx context.Context) {
 			continue
 		}
 
-		stale := false
-		var reason string
-
-		if repo.SourceType == "local" {
-			// Local sources are always re-indexed on startup.
-			stale = true
-			reason = "local source"
-		} else if repo.IndexedAt == "" {
-			stale = true
-			reason = "never indexed"
-		} else {
-			t, err := time.Parse(time.RFC3339, repo.IndexedAt)
-			if err != nil {
-				stale = true
-				reason = "unknown age"
-			} else if time.Since(t) > 24*time.Hour {
-				stale = true
-				reason = fmt.Sprintf("last indexed %s", repo.IndexedAt)
-			}
-		}
-
+		stale, reason := s.staleness(ctx, *repo)
 		if !stale {
 			continue
 		}
@@ -372,4 +352,32 @@ func (s *Server) autoRefresh(ctx context.Context) {
 
 		log.Printf("auto-refresh: queued %s (%s)", repo.Alias, reason)
 	}
+}
+
+// staleness reports whether a repo should be re-indexed and a short reason
+// suitable for the auto-refresh log line. Branches are evaluated in order:
+// local source, never indexed, malformed timestamp ("unknown age"), older
+// than 24h, indexed content with invalid encoding. A repo with a recent
+// timestamp and clean encoding returns (false, "").
+//
+// Errors from RepoHasInvalidEncoding are deliberately swallowed: a failing
+// scan must not block auto-refresh, and the next startup will retry.
+func (s *Server) staleness(ctx context.Context, repo store.Repo) (bool, string) {
+	if repo.SourceType == "local" {
+		return true, "local source"
+	}
+	if repo.IndexedAt == "" {
+		return true, "never indexed"
+	}
+	t, err := time.Parse(time.RFC3339, repo.IndexedAt)
+	if err != nil {
+		return true, "unknown age"
+	}
+	if time.Since(t) > 24*time.Hour {
+		return true, fmt.Sprintf("last indexed %s", repo.IndexedAt)
+	}
+	if invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, repo.ID); scanErr == nil && invalid {
+		return true, "indexed content contains invalid encoding"
+	}
+	return false, ""
 }
