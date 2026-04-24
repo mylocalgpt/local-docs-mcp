@@ -2,10 +2,12 @@ package mcpserver
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/mylocalgpt/local-docs-mcp/internal/config"
+	"github.com/mylocalgpt/local-docs-mcp/internal/indexer"
 	"github.com/mylocalgpt/local-docs-mcp/internal/search"
 	"github.com/mylocalgpt/local-docs-mcp/internal/store"
 )
@@ -87,5 +89,64 @@ func TestServerInitialize(t *testing.T) {
 	}
 	if err := serverSession.Wait(); err != nil {
 		t.Fatalf("server wait: %v", err)
+	}
+}
+
+// TestRunJobSkippedFilesStatusDetail verifies that when indexing succeeds but
+// the indexer reports skipped (undecodable) files, runJob writes a
+// human-readable summary into status_detail so list_repos surfaces it.
+func TestRunJobSkippedFilesStatusDetail(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer s.Close() //nolint:errcheck
+
+	srch := search.NewSearch(s)
+	srv := New(s, srch, nil, nil)
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	const alias = "skip-test"
+	repoID, err := s.UpsertRepo(alias, "/tmp/skip-test", "", "local")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	bi.SetResult(alias, &indexer.IndexResult{
+		Repo:          alias,
+		DocsIndexed:   3,
+		SkippedFiles:  2,
+		SkippedSample: []string{"a.md", "b.md"},
+	})
+
+	job := &Job{
+		Alias:  alias,
+		Kind:   jobKindLocal,
+		URL:    "/tmp/skip-test",
+		RepoID: repoID,
+		Done:   make(chan JobResult, 1),
+	}
+
+	res := srv.runJob(context.Background(), job)
+	if res.Err != nil {
+		t.Fatalf("runJob err: %v", res.Err)
+	}
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("repo not found")
+	}
+	if repo.Status != store.StatusReady {
+		t.Errorf("status = %q, want %q", repo.Status, store.StatusReady)
+	}
+	for _, want := range []string{"skipped 2", "a.md", "e.g."} {
+		if !strings.Contains(repo.StatusDetail, want) {
+			t.Errorf("status_detail %q missing %q", repo.StatusDetail, want)
+		}
 	}
 }

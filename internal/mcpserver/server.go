@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -226,6 +227,12 @@ func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 		if rebuildErr != nil {
 			status = store.StatusError
 			detail = "fts rebuild failed: " + rebuildErr.Error()
+		} else if result != nil && result.SkippedFiles > 0 {
+			sample := strings.Join(result.SkippedSample, ", ")
+			detail = fmt.Sprintf(
+				"indexed %d files; skipped %d with undecodable content (e.g. %s)",
+				result.DocsIndexed, result.SkippedFiles, sample,
+			)
 		}
 		if dbErr := s.store.UpdateRepoStatus(j.RepoID, status, detail); dbErr != nil {
 			log.Printf("queue: %s set %s status: %v", j.Alias, status, dbErr)
