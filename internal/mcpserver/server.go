@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 )
 
 var Version = "dev"
+
+const autoHealDidNotConvergePrefix = "auto-heal did not converge; repo still has invalid-encoding rows after re-index"
 
 // indexerIface is the subset of *indexer.Indexer that the server uses to run
 // indexing jobs. Extracted as an interface so tests can substitute a fake
@@ -151,9 +154,42 @@ func (s *Server) revertQueuedStatus(j *Job, detail string) {
 	if prior == "" {
 		prior = store.StatusReady
 	}
+	if detail == "" {
+		detail = j.PriorDetail
+	}
 	if err := s.store.UpdateRepoStatus(j.RepoID, prior, detail); err != nil {
 		log.Printf("queue: revert queued status for %s: %v", j.Alias, err)
 	}
+}
+
+// cancelJobStatus restores a cancelled job's prior repo status. Cancellation is
+// not a repo error; it means shutdown interrupted work that may be retried later.
+func (s *Server) cancelJobStatus(j *Job) {
+	if j.RepoID == 0 {
+		return
+	}
+	prior := j.PriorStatus
+	if prior == "" {
+		prior = store.StatusReady
+	}
+	detail := j.PriorDetail
+	if detail == "" {
+		detail = "cancelled at shutdown"
+	}
+	if dbErr := s.store.UpdateRepoStatus(j.RepoID, prior, detail); dbErr != nil {
+		log.Printf("queue: %s revert status on cancel: %v", j.Alias, dbErr)
+	}
+}
+
+func skippedFilesDetail(result *indexer.IndexResult) string {
+	detail := fmt.Sprintf(
+		"indexed %d files; skipped %d with undecodable content",
+		result.FilesIndexed, result.SkippedFiles,
+	)
+	if len(result.SkippedSample) > 0 {
+		detail += fmt.Sprintf(" (e.g. %s)", strings.Join(result.SkippedSample, ", "))
+	}
+	return detail
 }
 
 // runJob is the indexQueue worker callback. It performs a single indexing job
@@ -193,15 +229,7 @@ func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 	// error so update_docs callers can render a distinct message.
 	if jobErr != nil && (errors.Is(jobErr, context.Canceled) || errors.Is(jobErr, context.DeadlineExceeded)) {
 		log.Printf("queue: %s cancelled at shutdown", j.Alias)
-		if j.RepoID != 0 {
-			prior := j.PriorStatus
-			if prior == "" {
-				prior = store.StatusReady
-			}
-			if dbErr := s.store.UpdateRepoStatus(j.RepoID, prior, "cancelled at shutdown"); dbErr != nil {
-				log.Printf("queue: %s revert status on cancel: %v", j.Alias, dbErr)
-			}
-		}
+		s.cancelJobStatus(j)
 		return JobResult{IndexResult: result, Err: jobErr}
 	}
 
@@ -223,9 +251,36 @@ func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 	if j.RepoID != 0 {
 		status := store.StatusReady
 		detail := ""
+		if result != nil && result.Skipped {
+			detail = j.PriorDetail
+		}
 		if rebuildErr != nil {
 			status = store.StatusError
 			detail = "fts rebuild failed: " + rebuildErr.Error()
+		} else if j.ValidateHeal {
+			invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, j.RepoID)
+			if scanErr != nil {
+				if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
+					log.Printf("queue: %s cancelled during post-heal encoding scan", j.Alias)
+					s.cancelJobStatus(j)
+					return JobResult{IndexResult: result, Err: scanErr}
+				}
+				log.Printf("queue: %s post-heal encoding scan failed: %v", j.Alias, scanErr)
+				status = store.StatusError
+				detail = "post-heal encoding scan failed: " + scanErr.Error()
+				rebuildErr = fmt.Errorf("post-heal encoding scan failed: %w", scanErr)
+			} else if invalid {
+				detail = autoHealDidNotConvergePrefix + "; same-SHA git content may require remove/add until an explicit force affordance exists"
+				status = store.StatusError
+				rebuildErr = errors.New(detail)
+			}
+		}
+		if result != nil && result.SkippedFiles > 0 && status == store.StatusReady {
+			skippedDetail := skippedFilesDetail(result)
+			if detail != "" {
+				detail += "; "
+			}
+			detail += skippedDetail
 		}
 		if dbErr := s.store.UpdateRepoStatus(j.RepoID, status, detail); dbErr != nil {
 			log.Printf("queue: %s set %s status: %v", j.Alias, status, dbErr)
@@ -309,27 +364,7 @@ func (s *Server) autoRefresh(ctx context.Context) {
 			continue
 		}
 
-		stale := false
-		var reason string
-
-		if repo.SourceType == "local" {
-			// Local sources are always re-indexed on startup.
-			stale = true
-			reason = "local source"
-		} else if repo.IndexedAt == "" {
-			stale = true
-			reason = "never indexed"
-		} else {
-			t, err := time.Parse(time.RFC3339, repo.IndexedAt)
-			if err != nil {
-				stale = true
-				reason = "unknown age"
-			} else if time.Since(t) > 24*time.Hour {
-				stale = true
-				reason = fmt.Sprintf("last indexed %s", repo.IndexedAt)
-			}
-		}
-
+		stale, reason, force := s.staleness(ctx, *repo)
 		if !stale {
 			continue
 		}
@@ -343,14 +378,16 @@ func (s *Server) autoRefresh(ctx context.Context) {
 		}
 
 		job := &Job{
-			Alias:       repo.Alias,
-			Kind:        kindFromSourceType(repo.SourceType),
-			URL:         repo.URL,
-			Paths:       paths,
-			Force:       false,
-			Priority:    priorityBackground,
-			PriorStatus: repo.Status,
-			RepoID:      repo.ID,
+			Alias:        repo.Alias,
+			Kind:         kindFromSourceType(repo.SourceType),
+			URL:          repo.URL,
+			Paths:        paths,
+			Force:        force,
+			ValidateHeal: force,
+			Priority:     priorityBackground,
+			PriorStatus:  repo.Status,
+			PriorDetail:  repo.StatusDetail,
+			RepoID:       repo.ID,
 		}
 
 		_, _, _, _, enqErr := s.queue.enqueue(job)
@@ -365,4 +402,41 @@ func (s *Server) autoRefresh(ctx context.Context) {
 
 		log.Printf("auto-refresh: queued %s (%s)", repo.Alias, reason)
 	}
+}
+
+// staleness reports whether a repo should be re-indexed, a short reason
+// suitable for the auto-refresh log line, and whether the re-index must run
+// with Force=true. Branches are evaluated in order: local source, never
+// indexed, indexed content with invalid encoding, malformed timestamp
+// ("unknown age"), older than 24h. A repo with a recent timestamp and clean encoding
+// returns (false, "", false).
+//
+// Force is true only for the encoding-invalid branch: the git SHA is
+// unchanged, so indexer.IndexRepo would short-circuit on the SHA check and
+// leave the corrupt rows in place. All other branches re-fetch normally and
+// do not need Force.
+//
+// Errors from RepoHasInvalidEncoding are deliberately swallowed: a failing
+// scan must not block auto-refresh, and the next startup will retry.
+func (s *Server) staleness(ctx context.Context, repo store.Repo) (bool, string, bool) {
+	if repo.SourceType == "local" {
+		return true, "local source", false
+	}
+	if repo.IndexedAt == "" {
+		return true, "never indexed", false
+	}
+	if repo.Status == store.StatusError {
+		return false, "", false
+	}
+	if invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, repo.ID); scanErr == nil && invalid {
+		return true, "indexed content contains invalid encoding", true
+	}
+	t, err := time.Parse(time.RFC3339, repo.IndexedAt)
+	if err != nil {
+		return true, "unknown age", false
+	}
+	if time.Since(t) > 24*time.Hour {
+		return true, fmt.Sprintf("last indexed %s", repo.IndexedAt), false
+	}
+	return false, "", false
 }

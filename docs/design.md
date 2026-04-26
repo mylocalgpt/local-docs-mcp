@@ -87,6 +87,37 @@ Markdown files are split at heading boundaries rather than by fixed token count.
 
 On server startup, all repos are checked for staleness. Git repos older than 24 hours are re-indexed (skipped if the commit SHA is unchanged). Local directories are always re-scanned. This keeps documentation current without manual intervention.
 
+### Encoding handling
+
+The indexer accepts strict UTF-8, valid UTF-8 with BOM, UTF-16LE with BOM, and
+UTF-16BE with BOM. Files without a recognised BOM still run through
+`strings.ToValidUTF8`, which drops invalid byte sequences (for example,
+salvaging the ASCII portion of Windows-1252 markdown). Any successful decode
+path must produce UTF-8 text without embedded NUL bytes before content is
+stored.
+
+The indexer skips UTF-8 BOM files whose post-BOM bytes are not valid UTF-8. It
+also skips any decoded content that contains embedded NUL bytes, including
+fallback-sanitized no-BOM content. Skipped files are counted in
+`IndexResult.SkippedFiles`; the count and a sample of paths surface through
+`repos.status_detail`, visible through `list_repos`.
+
+On startup, `autoRefresh` runs `RepoHasInvalidEncoding` (a SQL byte-signature
+scan plus an exhaustive UTF-8 validity scan) on every git repo. Repos showing
+signs of legacy broken decoding self-heal through the existing queue
+lifecycle. Forced heals verify convergence after indexing and FTS rebuild
+before returning the repo to `ready`. If a fresh git repo is marked `error`
+because auto-heal did not converge, startup will not immediately retry the
+encoding branch.
+
+Normal MCP `update_docs` jobs use `Force=false`, so same-SHA git content may be
+skipped before the stored rows are rewritten. Until an explicit force affordance
+exists for MCP clients, users may need to remove and add the repo again to force
+a clean re-index after a non-converging encoding heal.
+
+Known limitations: BOM-less UTF-16 is not detected because heuristics produce
+false positives; file scope remains `.md` and `.mdx`.
+
 ## Database Schema
 
 Three tables:

@@ -352,17 +352,36 @@ func TestQueueUserPriorityBeatsBackground(t *testing.T) {
 func TestQueueCapacityFull(t *testing.T) {
 	q := newIndexQueue(nil)
 	gate := make(chan struct{})
+	started := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate) }) }
 	run := func(j *Job) JobResult {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
 		<-gate
 		return JobResult{}
 	}
 	stop := startWorker(t, q, run)
 	defer stop()
+	defer release()
 
-	// Fill the user lane: the worker takes one immediately and blocks on
-	// gate, so the channel still has room for queueCapacity more.
 	dones := make([]chan JobResult, 0, queueCapacity+1)
-	for i := 0; i < queueCapacity+1; i++ {
+	blockerDone, _, _, _, err := q.enqueue(&Job{Alias: "blocker", Priority: priorityUser})
+	if err != nil {
+		t.Fatalf("enqueue blocker: %v", err)
+	}
+	dones = append(dones, blockerDone)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start first job")
+	}
+
+	// The worker holds the blocker, so fill the entire user lane buffer.
+	for i := 0; i < queueCapacity; i++ {
 		alias := "a" + itoa(i)
 		d, _, _, _, err := q.enqueue(&Job{Alias: alias, Priority: priorityUser})
 		if err != nil {
@@ -371,12 +390,12 @@ func TestQueueCapacityFull(t *testing.T) {
 		dones = append(dones, d)
 	}
 	// Now the channel is full (worker holds 1, channel buffers queueCapacity).
-	_, _, _, _, err := q.enqueue(&Job{Alias: "overflow", Priority: priorityUser})
+	_, _, _, _, err = q.enqueue(&Job{Alias: "overflow", Priority: priorityUser})
 	if !errors.Is(err, errQueueFull) {
 		t.Fatalf("expected errQueueFull, got %v", err)
 	}
 
-	close(gate)
+	release()
 	for _, d := range dones {
 		recvWithin(t, d, 5*time.Second)
 	}

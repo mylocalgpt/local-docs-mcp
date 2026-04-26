@@ -26,6 +26,11 @@ type BlockingIndexer struct {
 	// Optional hook that produces a custom result for the next call to a
 	// given alias. Keyed by alias; consumed (deleted) on use.
 	results map[string]*indexer.IndexResult
+
+	// Optional hook invoked after recordAndWait succeeds and before the result
+	// is returned. Tests use this to trigger state changes at a precise point in
+	// runJob's lifecycle without racing goroutines.
+	afterRecord map[string]func()
 }
 
 // IndexerCall records one observed invocation of the BlockingIndexer.
@@ -40,8 +45,9 @@ type IndexerCall struct {
 // NewBlockingIndexer constructs an empty BlockingIndexer ready for use.
 func NewBlockingIndexer() *BlockingIndexer {
 	return &BlockingIndexer{
-		blocks:  make(map[string]chan struct{}),
-		results: make(map[string]*indexer.IndexResult),
+		blocks:      make(map[string]chan struct{}),
+		results:     make(map[string]*indexer.IndexResult),
+		afterRecord: make(map[string]func()),
 	}
 }
 
@@ -58,10 +64,16 @@ func (b *BlockingIndexer) Block(alias string) chan struct{} {
 
 // SetResult queues a custom *indexer.IndexResult to return on the next call
 // for alias. Cleared after one use. If unset, calls return a synthetic
-// success with DocsIndexed=1.
+// success with DocsIndexed=1 and FilesIndexed=1.
 func (b *BlockingIndexer) SetResult(alias string, r *indexer.IndexResult) {
 	b.mu.Lock()
 	b.results[alias] = r
+	b.mu.Unlock()
+}
+
+func (b *BlockingIndexer) SetAfterRecord(alias string, fn func()) {
+	b.mu.Lock()
+	b.afterRecord[alias] = fn
 	b.mu.Unlock()
 }
 
@@ -95,6 +107,7 @@ func (b *BlockingIndexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, 
 	if err := b.recordAndWait(ctx, IndexerCall{Alias: cfg.Alias, URL: cfg.URL, Paths: cfg.Paths, Force: force, Local: false}); err != nil {
 		return nil, err
 	}
+	b.runAfterRecord(cfg.Alias)
 	return b.takeResult(cfg.Alias), nil
 }
 
@@ -105,6 +118,7 @@ func (b *BlockingIndexer) IndexLocalPath(ctx context.Context, alias, path string
 	if err := b.recordAndWait(ctx, IndexerCall{Alias: alias, URL: path, Local: true}); err != nil {
 		return nil, err
 	}
+	b.runAfterRecord(alias)
 	return b.takeResult(alias), nil
 }
 
@@ -135,5 +149,17 @@ func (b *BlockingIndexer) takeResult(alias string) *indexer.IndexResult {
 	if r != nil {
 		return r
 	}
-	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1, Duration: time.Millisecond}
+	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1, FilesIndexed: 1, Duration: time.Millisecond}
+}
+
+func (b *BlockingIndexer) runAfterRecord(alias string) {
+	b.mu.Lock()
+	fn, ok := b.afterRecord[alias]
+	if ok {
+		delete(b.afterRecord, alias)
+	}
+	b.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
