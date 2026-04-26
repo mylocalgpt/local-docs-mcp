@@ -25,6 +25,7 @@ type Indexer struct {
 type IndexResult struct {
 	Repo          string
 	DocsIndexed   int
+	FilesIndexed  int
 	Duration      time.Duration
 	Skipped       bool
 	Error         error
@@ -36,6 +37,7 @@ type IndexResult struct {
 // chunked documents with bookkeeping about files the decoder rejected.
 type walkResult struct {
 	Docs    []store.Document
+	Files   int
 	Skipped int
 	Sample  []string
 }
@@ -133,6 +135,7 @@ func (ix *Indexer) IndexRepo(ctx context.Context, cfg config.RepoConfig, force b
 	}
 	result.SkippedFiles = wr.Skipped
 	result.SkippedSample = wr.Sample
+	result.FilesIndexed = wr.Files
 
 	// 7. Replace documents atomically
 	if err := ix.store.ReplaceDocuments(repoID, wr.Docs); err != nil {
@@ -210,6 +213,7 @@ func (ix *Indexer) walkAndChunk(ctx context.Context, rootDir string, paths []str
 				}
 				return nil
 			}
+			result.Files++
 
 			chunks := ProcessMarkdownFile(relPath, decoded)
 			for _, c := range chunks {
@@ -272,6 +276,7 @@ func (ix *Indexer) IndexLocalPath(ctx context.Context, alias, dirPath string) (*
 	}
 	result.SkippedFiles = wr.Skipped
 	result.SkippedSample = wr.Sample
+	result.FilesIndexed = wr.Files
 
 	if err := ix.store.ReplaceDocuments(repoID, wr.Docs); err != nil {
 		result.Error = fmt.Errorf("replace documents %s: %w", alias, err)

@@ -117,6 +117,7 @@ func TestRunJobSkippedFilesStatusDetail(t *testing.T) {
 	bi.SetResult(alias, &indexer.IndexResult{
 		Repo:          alias,
 		DocsIndexed:   3,
+		FilesIndexed:  1,
 		SkippedFiles:  2,
 		SkippedSample: []string{"a.md", "b.md"},
 	})
@@ -144,9 +145,65 @@ func TestRunJobSkippedFilesStatusDetail(t *testing.T) {
 	if repo.Status != store.StatusReady {
 		t.Errorf("status = %q, want %q", repo.Status, store.StatusReady)
 	}
-	for _, want := range []string{"skipped 2", "a.md", "e.g."} {
+	for _, want := range []string{"indexed 1 files", "skipped 2", "a.md", "e.g."} {
 		if !strings.Contains(repo.StatusDetail, want) {
 			t.Errorf("status_detail %q missing %q", repo.StatusDetail, want)
+		}
+	}
+}
+
+func TestRunJobSkippedFilesStatusDetailNoSample(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer s.Close() //nolint:errcheck
+
+	srch := search.NewSearch(s)
+	srv := New(s, srch, nil, nil)
+
+	bi := NewBlockingIndexer()
+	srv.indexer = bi
+
+	const alias = "skip-no-sample"
+	repoID, err := s.UpsertRepo(alias, "/tmp/skip-no-sample", "", "local")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	bi.SetResult(alias, &indexer.IndexResult{
+		Repo:         alias,
+		DocsIndexed:  3,
+		FilesIndexed: 1,
+		SkippedFiles: 2,
+	})
+
+	job := &Job{
+		Alias:  alias,
+		Kind:   jobKindLocal,
+		URL:    "/tmp/skip-no-sample",
+		RepoID: repoID,
+		Done:   make(chan JobResult, 1),
+	}
+
+	res := srv.runJob(context.Background(), job)
+	if res.Err != nil {
+		t.Fatalf("runJob err: %v", res.Err)
+	}
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("repo not found")
+	}
+	if !strings.Contains(repo.StatusDetail, "skipped 2") {
+		t.Errorf("status_detail %q missing skipped count", repo.StatusDetail)
+	}
+	for _, unwanted := range []string{"(e.g. )", "e.g."} {
+		if strings.Contains(repo.StatusDetail, unwanted) {
+			t.Errorf("status_detail %q unexpectedly contains %q", repo.StatusDetail, unwanted)
 		}
 	}
 }

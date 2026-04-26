@@ -58,7 +58,7 @@ func (b *BlockingIndexer) Block(alias string) chan struct{} {
 
 // SetResult queues a custom *indexer.IndexResult to return on the next call
 // for alias. Cleared after one use. If unset, calls return a synthetic
-// success with DocsIndexed=1.
+// success with DocsIndexed=1 and FilesIndexed=1.
 func (b *BlockingIndexer) SetResult(alias string, r *indexer.IndexResult) {
 	b.mu.Lock()
 	b.results[alias] = r
@@ -135,5 +135,5 @@ func (b *BlockingIndexer) takeResult(alias string) *indexer.IndexResult {
 	if r != nil {
 		return r
 	}
-	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1, Duration: time.Millisecond}
+	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1, FilesIndexed: 1, Duration: time.Millisecond}
 }

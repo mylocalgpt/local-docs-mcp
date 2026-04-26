@@ -242,11 +242,13 @@ func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 				rebuildErr = errors.New(detail)
 			}
 		} else if result != nil && result.SkippedFiles > 0 {
-			sample := strings.Join(result.SkippedSample, ", ")
 			detail = fmt.Sprintf(
-				"indexed %d files; skipped %d with undecodable content (e.g. %s)",
-				result.DocsIndexed, result.SkippedFiles, sample,
+				"indexed %d files; skipped %d with undecodable content",
+				result.FilesIndexed, result.SkippedFiles,
 			)
+			if len(result.SkippedSample) > 0 {
+				detail += fmt.Sprintf(" (e.g. %s)", strings.Join(result.SkippedSample, ", "))
+			}
 		}
 		if dbErr := s.store.UpdateRepoStatus(j.RepoID, status, detail); dbErr != nil {
 			log.Printf("queue: %s set %s status: %v", j.Alias, status, dbErr)
