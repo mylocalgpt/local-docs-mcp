@@ -111,6 +111,13 @@ func TestStaleness(t *testing.T) {
 			wantReason: "indexed content contains invalid encoding",
 			wantForce:  true,
 		},
+		{
+			name:       "fresh encoding error repo",
+			repo:       store.Repo{ID: brokenID, SourceType: "git", Status: store.StatusError, IndexedAt: fresh},
+			wantStale:  false,
+			wantReason: "",
+			wantForce:  false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -126,6 +133,39 @@ func TestStaleness(t *testing.T) {
 				t.Errorf("force = %v, want %v", gotForce, tc.wantForce)
 			}
 		})
+	}
+}
+
+func TestAutoRefreshDoesNotQueueCleanUnicodeRepo(t *testing.T) {
+	srv, s, cleanup := newTestServer(t)
+	defer cleanup()
+
+	const alias = "clean-unicode"
+	repoID, err := s.UpsertRepo(alias, "https://example.com/clean", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	fresh := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	if err := s.UpdateRepoIndex(repoID, "deadbeef", fresh, 1); err != nil {
+		t.Fatalf("UpdateRepoIndex: %v", err)
+	}
+	if err := s.UpdateRepoStatus(repoID, store.StatusReady, ""); err != nil {
+		t.Fatalf("UpdateRepoStatus: %v", err)
+	}
+	seedDoc(t, s, repoID, "unicode.md", "cafe CJK 漢字 emoji 😀 smart quotes “ok”")
+
+	srv.autoRefresh(context.Background())
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if repo == nil || repo.Status != store.StatusReady {
+		t.Fatalf("expected ready repo after autoRefresh, got %+v", repo)
+	}
+	calls := srv.indexer.(*BlockingIndexer).CallsFor(alias)
+	if len(calls) != 0 {
+		t.Fatalf("indexer was called for clean Unicode repo: %+v", calls)
 	}
 }
 
@@ -230,12 +270,12 @@ func (h *healingIndexer) IndexLocalPath(ctx context.Context, alias, path string)
 	return &indexer.IndexResult{Repo: alias, DocsIndexed: 1}, nil
 }
 
-// TestAutoRefreshEncodingHealReplacesCorruptRows is the integration guard for
+// TestAutoRefreshEncodingHealReplacesCorruptRowsAndStops is the integration guard for
 // the F1 fix. It seeds a git repo whose commit SHA is unchanged but whose
 // indexed rows contain invalid encoding, then drives autoRefresh + the queue
 // worker to completion. Without Force=true on the heal job, the real indexer
 // would short-circuit on the SHA match and the corrupt row would persist.
-func TestAutoRefreshEncodingHealReplacesCorruptRows(t *testing.T) {
+func TestAutoRefreshEncodingHealReplacesCorruptRowsAndStops(t *testing.T) {
 	s, err := store.NewStore(":memory:")
 	if err != nil {
 		t.Fatalf("create store: %v", err)
@@ -243,7 +283,7 @@ func TestAutoRefreshEncodingHealReplacesCorruptRows(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	srv := New(s, search.NewSearch(s), nil, nil)
-	ix := &healingIndexer{store: s, cleanText: "clean hello"}
+	ix := &healingIndexer{store: s, cleanText: "clean cafe 漢字 😀"}
 	srv.indexer = ix
 
 	const alias = "broken"
@@ -324,5 +364,128 @@ func TestAutoRefreshEncodingHealReplacesCorruptRows(t *testing.T) {
 	}
 	if stillInvalid {
 		t.Error("invalid encoding still present after heal; F1 regression")
+	}
+
+	srv.autoRefresh(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	ix.mu.Lock()
+	callCount := len(ix.gotForce)
+	ix.mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("autoRefresh queued another heal after convergence; calls = %d", callCount)
+	}
+}
+
+func TestAutoRefreshStopsRetryingAfterFailedHeal(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	srv := New(s, search.NewSearch(s), nil, nil)
+	ix := &healingIndexer{store: s, cleanText: "\xEF\xBB\xBFstill broken"}
+	srv.indexer = ix
+
+	const alias = "failed-heal"
+	repoID, err := s.UpsertRepo(alias, "https://example.com/failed", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	fresh := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	if err := s.UpdateRepoIndex(repoID, "deadbeef", fresh, 1); err != nil {
+		t.Fatalf("UpdateRepoIndex: %v", err)
+	}
+	if err := s.UpdateRepoStatus(repoID, store.StatusReady, ""); err != nil {
+		t.Fatalf("UpdateRepoStatus: %v", err)
+	}
+	seedDoc(t, s, repoID, "a.md", "\xEF\xBB\xBFhello")
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		srv.queue.worker(workerCtx, srv.runJob)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		workerCancel()
+		<-workerDone
+	})
+
+	srv.autoRefresh(context.Background())
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		repo, err := s.GetRepo(alias)
+		if err != nil {
+			t.Fatalf("GetRepo: %v", err)
+		}
+		if repo != nil && repo.Status == store.StatusError {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	repo, err := s.GetRepo(alias)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if repo == nil || repo.Status != store.StatusError {
+		t.Fatalf("expected error repo after failed heal, got %+v", repo)
+	}
+	if !strings.Contains(repo.StatusDetail, "auto-heal did not converge") {
+		t.Fatalf("status_detail missing failed convergence message: %q", repo.StatusDetail)
+	}
+
+	ix.mu.Lock()
+	firstCallCount := len(ix.gotForce)
+	ix.mu.Unlock()
+	if firstCallCount != 1 {
+		t.Fatalf("expected one heal attempt, got %d", firstCallCount)
+	}
+
+	srv.autoRefresh(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	ix.mu.Lock()
+	secondCallCount := len(ix.gotForce)
+	ix.mu.Unlock()
+	if secondCallCount != firstCallCount {
+		t.Fatalf("autoRefresh retried failed fresh heal; calls before=%d after=%d", firstCallCount, secondCallCount)
+	}
+}
+
+func TestRunJobFailedHealReturnsError(t *testing.T) {
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	srv := New(s, search.NewSearch(s), nil, nil)
+	ix := &healingIndexer{store: s, cleanText: "\xEF\xBB\xBFstill broken"}
+	srv.indexer = ix
+
+	const alias = "runjob-failed-heal"
+	repoID, err := s.UpsertRepo(alias, "https://example.com/failed", `["docs"]`, "git")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	seedDoc(t, s, repoID, "a.md", "\xEF\xBB\xBFhello")
+
+	res := srv.runJob(context.Background(), &Job{
+		Alias:  alias,
+		Kind:   jobKindGit,
+		URL:    "https://example.com/failed",
+		Paths:  []string{"docs"},
+		Force:  true,
+		RepoID: repoID,
+	})
+	if res.Err == nil {
+		t.Fatal("expected failed convergence to return JobResult.Err")
+	}
+	if !strings.HasPrefix(res.Err.Error(), autoHealDidNotConvergePrefix) {
+		t.Fatalf("JobResult.Err = %q, want prefix %q", res.Err.Error(), autoHealDidNotConvergePrefix)
 	}
 }

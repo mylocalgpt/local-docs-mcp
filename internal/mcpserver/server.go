@@ -20,6 +20,8 @@ import (
 
 var Version = "dev"
 
+const autoHealDidNotConvergePrefix = "auto-heal did not converge; repo still has invalid-encoding rows after re-index"
+
 // indexerIface is the subset of *indexer.Indexer that the server uses to run
 // indexing jobs. Extracted as an interface so tests can substitute a fake
 // (e.g. BlockingIndexer) without driving real git operations. ctx is first
@@ -227,6 +229,18 @@ func (s *Server) runJob(ctx context.Context, j *Job) JobResult {
 		if rebuildErr != nil {
 			status = store.StatusError
 			detail = "fts rebuild failed: " + rebuildErr.Error()
+		} else if j.Force {
+			invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, j.RepoID)
+			if scanErr != nil {
+				log.Printf("queue: %s post-heal encoding scan failed: %v", j.Alias, scanErr)
+				status = store.StatusError
+				detail = "post-heal encoding scan failed: " + scanErr.Error()
+				rebuildErr = fmt.Errorf("post-heal encoding scan failed: %w", scanErr)
+			} else if invalid {
+				detail = autoHealDidNotConvergePrefix + "; same-SHA git content may require remove/add until an explicit force affordance exists"
+				status = store.StatusError
+				rebuildErr = errors.New(detail)
+			}
 		} else if result != nil && result.SkippedFiles > 0 {
 			sample := strings.Join(result.SkippedSample, ", ")
 			detail = fmt.Sprintf(
@@ -381,6 +395,9 @@ func (s *Server) staleness(ctx context.Context, repo store.Repo) (bool, string, 
 	}
 	if time.Since(t) > 24*time.Hour {
 		return true, fmt.Sprintf("last indexed %s", repo.IndexedAt), false
+	}
+	if repo.Status == store.StatusError {
+		return false, "", false
 	}
 	if invalid, scanErr := s.store.RepoHasInvalidEncoding(ctx, repo.ID); scanErr == nil && invalid {
 		return true, "indexed content contains invalid encoding", true
