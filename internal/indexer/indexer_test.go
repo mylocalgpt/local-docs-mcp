@@ -389,6 +389,9 @@ func TestIndexLocalPathSkipsUndecodable(t *testing.T) {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(dir, "embedded_nul.md"), []byte("# Heading\nhi\x00there\n"), 0o644); err != nil {
+		t.Fatalf("write embedded_nul.md: %v", err)
+	}
 
 	s, err := store.NewStore(":memory:")
 	if err != nil {
@@ -412,11 +415,17 @@ func TestIndexLocalPathSkipsUndecodable(t *testing.T) {
 	if result.DocsIndexed == 0 {
 		t.Fatal("expected at least one document from valid utf16le.md")
 	}
-	if result.SkippedFiles != 1 {
-		t.Fatalf("SkippedFiles: got %d, want 1", result.SkippedFiles)
+	if result.SkippedFiles != 2 {
+		t.Fatalf("SkippedFiles: got %d, want 2", result.SkippedFiles)
 	}
-	if len(result.SkippedSample) != 1 || result.SkippedSample[0] != "utf16_truncated.md" {
-		t.Fatalf("SkippedSample: got %v, want [utf16_truncated.md]", result.SkippedSample)
+	wantSample := []string{"embedded_nul.md", "utf16_truncated.md"}
+	if len(result.SkippedSample) != len(wantSample) {
+		t.Fatalf("SkippedSample: got %v, want %v", result.SkippedSample, wantSample)
+	}
+	for i, want := range wantSample {
+		if result.SkippedSample[i] != want {
+			t.Fatalf("SkippedSample: got %v, want %v", result.SkippedSample, wantSample)
+		}
 	}
 }
 

@@ -2,27 +2,44 @@ package indexer
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // decodeFileContent decodes raw file bytes into a UTF-8 string.
 //
 // Detection order:
 //  1. Empty input -> "".
-//  2. UTF-8 BOM (EF BB BF) -> strip BOM, return remainder.
+//  2. UTF-8 BOM (EF BB BF) -> strip BOM, strictly validate remainder.
 //  3. UTF-16LE BOM (FF FE) -> decode as UTF-16 little-endian.
 //  4. UTF-16BE BOM (FE FF) -> decode as UTF-16 big-endian.
 //  5. Otherwise -> strings.ToValidUTF8 fallback (drops invalid byte sequences).
 //
-// The fallback always returns a nil error and a SQLite-safe string for
-// typical Windows-1252 inputs (no NULs are introduced).
+// Every successful output rejects embedded NUL bytes so it is safe for the
+// store encoding health scan. The no-BOM fallback preserves legacy behavior for
+// typical Windows-1252 inputs when sanitization does not leave NUL bytes.
 func decodeFileContent(data []byte) (string, error) {
+	decoded, err := decodeFileContentRaw(data)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsRune(decoded, '\x00') {
+		return "", errors.New("decode content: embedded nul byte")
+	}
+	return decoded, nil
+}
+
+func decodeFileContentRaw(data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", nil
 	}
 	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		if !utf8.Valid(data[3:]) {
+			return "", errors.New("decode utf-8 bom: invalid utf-8")
+		}
 		return string(data[3:]), nil
 	}
 	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE {
