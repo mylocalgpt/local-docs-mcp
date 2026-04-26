@@ -89,22 +89,35 @@ On server startup, all repos are checked for staleness. Git repos older than 24 
 
 ### Encoding handling
 
-The indexer accepts UTF-8, UTF-8 with BOM, and UTF-16 LE/BE with BOM. Files
-without a recognised BOM run through `strings.ToValidUTF8`, which drops
-invalid byte sequences (e.g. salvaging the ASCII portion of Windows-1252
-markdown). Files the decoder cannot salvage are skipped at index time and
-counted in `IndexResult.SkippedFiles`; the count and a sample of paths
-surface via `repos.status_detail`, visible through `list_repos`.
+The indexer accepts strict UTF-8, valid UTF-8 with BOM, UTF-16LE with BOM, and
+UTF-16BE with BOM. Files without a recognised BOM still run through
+`strings.ToValidUTF8`, which drops invalid byte sequences (for example,
+salvaging the ASCII portion of Windows-1252 markdown). Any successful decode
+path must produce UTF-8 text without embedded NUL bytes before content is
+stored.
+
+The indexer skips UTF-8 BOM files whose post-BOM bytes are not valid UTF-8. It
+also skips any decoded content that contains embedded NUL bytes, including
+fallback-sanitized no-BOM content. Skipped files are counted in
+`IndexResult.SkippedFiles`; the count and a sample of paths surface through
+`repos.status_detail`, visible through `list_repos`.
 
 On startup, `autoRefresh` runs `RepoHasInvalidEncoding` (a SQL byte-signature
 scan plus a 200-row UTF-8 validity sample) on every git repo. Repos showing
 signs of legacy broken decoding self-heal through the existing queue
-lifecycle.
+lifecycle. Forced heals verify convergence after indexing and FTS rebuild
+before returning the repo to `ready`. If a fresh git repo is marked `error`
+because auto-heal did not converge, startup will not immediately retry the
+encoding branch.
+
+Normal MCP `update_docs` jobs use `Force=false`, so same-SHA git content may be
+skipped before the stored rows are rewritten. Until an explicit force affordance
+exists for MCP clients, users may need to remove and add the repo again to force
+a clean re-index after a non-converging encoding heal.
 
 Known limitations: BOM-less UTF-16 is not detected (heuristics produce false
 positives); sparse invalid-UTF-8 corruption (no BOM, no NUL) past the 200-row
-Pass 2 sample may slip past the scan, with `update_docs` as the manual
-escape hatch; file scope remains `.md` and `.mdx`.
+Pass 2 sample may slip past the scan; file scope remains `.md` and `.mdx`.
 
 ## Database Schema
 
