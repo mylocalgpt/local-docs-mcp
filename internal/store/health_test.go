@@ -50,6 +50,32 @@ func TestRepoHasInvalidEncoding_CleanRepo(t *testing.T) {
 	}
 }
 
+func TestRepoHasInvalidEncoding_CleanRepoUnicode(t *testing.T) {
+	s := newTestStore(t)
+	repoID := newRepoForHealth(t, s, "cleanunicode")
+	docs := map[string]string{
+		"ascii.md":      "hello world",
+		"latin.md":      "héllo",
+		"decomposed.md": "he\u0301llo",
+		"cjk.md":        "日本語",
+		"emoji.md":      "🎉",
+		"quotes.md":     "“smart quotes”",
+		"rtl.md":        "مرحبا بالعالم",
+		"code.md":       "```go\nfmt.Println(\"hello\")\n```",
+	}
+	for path, content := range docs {
+		insertRawDoc(t, s, repoID, path, content)
+	}
+
+	bad, err := s.RepoHasInvalidEncoding(context.Background(), repoID)
+	if err != nil {
+		t.Fatalf("RepoHasInvalidEncoding: %v", err)
+	}
+	if bad {
+		t.Errorf("expected false for clean Unicode repo, got true")
+	}
+}
+
 func TestRepoHasInvalidEncoding_UTF8BOM(t *testing.T) {
 	s := newTestStore(t)
 	repoID := newRepoForHealth(t, s, "utf8bom")
@@ -106,7 +132,7 @@ func TestRepoHasInvalidEncoding_EmbeddedNUL(t *testing.T) {
 	}
 }
 
-func TestRepoHasInvalidEncoding_Pass1Sparse(t *testing.T) {
+func TestRepoHasInvalidEncoding_Pass1ExhaustiveAcrossManyRows(t *testing.T) {
 	s := newTestStore(t)
 	repoID := newRepoForHealth(t, s, "pass1sparse")
 	for i := 0; i < 250; i++ {
@@ -119,7 +145,7 @@ func TestRepoHasInvalidEncoding_Pass1Sparse(t *testing.T) {
 		t.Fatalf("RepoHasInvalidEncoding: %v", err)
 	}
 	if !bad {
-		t.Errorf("expected true for sparse Pass-1 hit beyond the 200 sample window, got false")
+		t.Errorf("expected true for Pass-1 BOM hit across many rows, got false")
 	}
 }
 
