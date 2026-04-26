@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// Note: cases beyond 200 rows for the invalid-UTF-8 (no-BOM, no-NUL)
-// symptom are intentionally not covered. The proposal documents this as a
-// known limit of the bounded Pass 2 sample; manual update_docs is the
-// escape hatch for that sparse case.
-
 // insertRawDoc bypasses the regular writer so we can plant rows whose
 // content the normal indexer would have rejected (BOMs, embedded NULs,
 // invalid UTF-8 sequences).
@@ -164,10 +159,10 @@ func TestRepoHasInvalidEncoding_Pass2InvalidUTF8(t *testing.T) {
 	}
 }
 
-func TestRepoHasInvalidEncoding_Pass2SparseWithinSample(t *testing.T) {
+func TestRepoHasInvalidEncoding_Pass2ExhaustiveAcrossManyRows(t *testing.T) {
 	s := newTestStore(t)
 	repoID := newRepoForHealth(t, s, "pass2sparse")
-	for i := 0; i < 199; i++ {
+	for i := 0; i < 250; i++ {
 		insertRawDoc(t, s, repoID, fmt.Sprintf("doc-%03d.md", i), "clean ascii row")
 	}
 	insertRawDoc(t, s, repoID, "corrupt.md", "hello \xC3\x28 world")
@@ -177,23 +172,6 @@ func TestRepoHasInvalidEncoding_Pass2SparseWithinSample(t *testing.T) {
 		t.Fatalf("RepoHasInvalidEncoding: %v", err)
 	}
 	if !bad {
-		t.Errorf("expected true for invalid UTF-8 within bounded Pass-2 sample, got false")
-	}
-}
-
-func TestRepoHasInvalidEncoding_Pass2BoundedDeterministicSample(t *testing.T) {
-	s := newTestStore(t)
-	repoID := newRepoForHealth(t, s, "pass2bounded")
-	for i := 0; i < 200; i++ {
-		insertRawDoc(t, s, repoID, fmt.Sprintf("doc-%03d.md", i), "clean ascii row")
-	}
-	insertRawDoc(t, s, repoID, "outside-sample.md", "hello \xC3\x28 world")
-
-	bad, err := s.RepoHasInvalidEncoding(context.Background(), repoID)
-	if err != nil {
-		t.Fatalf("RepoHasInvalidEncoding: %v", err)
-	}
-	if bad {
-		t.Errorf("expected false for invalid UTF-8 outside deterministic Pass-2 sample, got true")
+		t.Errorf("expected true for invalid UTF-8 across many rows, got false")
 	}
 }

@@ -29,6 +29,8 @@ func TestDecodeFileContent(t *testing.T) {
 		{name: "windows1252", fixture: "windows1252.md"},
 		{name: "utf16_truncated", fixture: "utf16_truncated.md", wantErr: true},
 		{name: "utf8_bom_invalid", rawData: []byte{0xEF, 0xBB, 0xBF, 0xFF}, wantErr: true},
+		{name: "utf32le_bom", rawData: []byte{0xFF, 0xFE, 0x00, 0x00, '#', 0x00, 0x00, 0x00}, wantErr: true},
+		{name: "utf32be_bom", rawData: []byte{0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, '#'}, wantErr: true},
 		{name: "embedded_nul", rawData: []byte("# Heading\nhi\x00there\n"), wantErr: true},
 		{name: "bomless_utf16_looking", rawData: []byte{'#', 0x00, ' ', 0x00}, wantErr: true},
 	}

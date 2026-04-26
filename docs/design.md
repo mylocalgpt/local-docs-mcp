@@ -103,7 +103,7 @@ fallback-sanitized no-BOM content. Skipped files are counted in
 `repos.status_detail`, visible through `list_repos`.
 
 On startup, `autoRefresh` runs `RepoHasInvalidEncoding` (a SQL byte-signature
-scan plus a 200-row UTF-8 validity sample) on every git repo. Repos showing
+scan plus an exhaustive UTF-8 validity scan) on every git repo. Repos showing
 signs of legacy broken decoding self-heal through the existing queue
 lifecycle. Forced heals verify convergence after indexing and FTS rebuild
 before returning the repo to `ready`. If a fresh git repo is marked `error`
@@ -115,9 +115,8 @@ skipped before the stored rows are rewritten. Until an explicit force affordance
 exists for MCP clients, users may need to remove and add the repo again to force
 a clean re-index after a non-converging encoding heal.
 
-Known limitations: BOM-less UTF-16 is not detected (heuristics produce false
-positives); sparse invalid-UTF-8 corruption (no BOM, no NUL) past the 200-row
-Pass 2 sample may slip past the scan; file scope remains `.md` and `.mdx`.
+Known limitations: BOM-less UTF-16 is not detected because heuristics produce
+false positives; file scope remains `.md` and `.mdx`.
 
 ## Database Schema
 

@@ -48,6 +48,7 @@ func buildJobFromRepo(repo *store.Repo, priority JobPriority) (*Job, error) {
 		Force:       false,
 		Priority:    priority,
 		PriorStatus: repo.Status,
+		PriorDetail: repo.StatusDetail,
 		RepoID:      repo.ID,
 	}
 	if repo.SourceType != "local" {

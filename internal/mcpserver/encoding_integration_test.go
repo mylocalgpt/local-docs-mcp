@@ -64,11 +64,12 @@ func TestEncodingRegressionUTF16LEBOM(t *testing.T) {
 		srv.queue.worker(workerCtx, srv.runJob)
 		close(workerDone)
 	}()
+	t.Cleanup(func() {
+		workerCancel()
+		<-workerDone
+	})
 
 	waitForRepoStatus(t, srv, "encoding-regression", store.StatusReady)
-
-	workerCancel()
-	<-workerDone
 
 	repo, err := srv.store.GetRepo("encoding-regression")
 	if err != nil {

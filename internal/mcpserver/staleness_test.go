@@ -93,6 +93,13 @@ func TestStaleness(t *testing.T) {
 			wantReason: "unknown age",
 		},
 		{
+			name:       "unknown age and encoding broken",
+			repo:       store.Repo{ID: brokenID, SourceType: "git", IndexedAt: "not-a-timestamp"},
+			wantStale:  true,
+			wantReason: "indexed content contains invalid encoding",
+			wantForce:  true,
+		},
+		{
 			name:       "older than 24h",
 			repo:       store.Repo{ID: cleanID, SourceType: "git", IndexedAt: old},
 			wantStale:  true,
@@ -107,6 +114,13 @@ func TestStaleness(t *testing.T) {
 		{
 			name:       "fresh but encoding broken",
 			repo:       store.Repo{ID: brokenID, SourceType: "git", IndexedAt: fresh},
+			wantStale:  true,
+			wantReason: "indexed content contains invalid encoding",
+			wantForce:  true,
+		},
+		{
+			name:       "old and encoding broken",
+			repo:       store.Repo{ID: brokenID, SourceType: "git", IndexedAt: old},
 			wantStale:  true,
 			wantReason: "indexed content contains invalid encoding",
 			wantForce:  true,
@@ -475,12 +489,13 @@ func TestRunJobFailedHealReturnsError(t *testing.T) {
 	seedDoc(t, s, repoID, "a.md", "\xEF\xBB\xBFhello")
 
 	res := srv.runJob(context.Background(), &Job{
-		Alias:  alias,
-		Kind:   jobKindGit,
-		URL:    "https://example.com/failed",
-		Paths:  []string{"docs"},
-		Force:  true,
-		RepoID: repoID,
+		Alias:        alias,
+		Kind:         jobKindGit,
+		URL:          "https://example.com/failed",
+		Paths:        []string{"docs"},
+		Force:        true,
+		ValidateHeal: true,
+		RepoID:       repoID,
 	})
 	if res.Err == nil {
 		t.Fatal("expected failed convergence to return JobResult.Err")

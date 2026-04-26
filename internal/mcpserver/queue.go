@@ -47,16 +47,18 @@ type JobResult struct {
 // the worker can always deliver the result without blocking, even when the
 // caller has stopped listening (the async add_docs case).
 type Job struct {
-	Alias       string
-	Kind        JobKind
-	URL         string
-	Paths       []string
-	Force       bool
-	Priority    JobPriority
-	PriorStatus string // repo's status before being set to queued; used to revert on shutdown
-	RepoID      int64  // DB row id; set by handlers so worker/shutdown can update without an alias lookup
-	seq         uint64 // monotonic; assigned at enqueue under mu; used for position calc
-	Done        chan JobResult
+	Alias        string
+	Kind         JobKind
+	URL          string
+	Paths        []string
+	Force        bool
+	ValidateHeal bool // true only for auto-heal jobs that must prove corrupt rows were replaced
+	Priority     JobPriority
+	PriorStatus  string // repo's status before being set to queued; used to revert on shutdown
+	PriorDetail  string // repo's status_detail before queued/indexing overwrote it
+	RepoID       int64  // DB row id; set by handlers so worker/shutdown can update without an alias lookup
+	seq          uint64 // monotonic; assigned at enqueue under mu; used for position calc
+	Done         chan JobResult
 }
 
 // indexQueue is a single-worker queue with two priority lanes. All mutating
@@ -136,6 +138,9 @@ func (q *indexQueue) enqueue(job *Job) (done chan JobResult, position int, coale
 		// over a queued auto-refresh.
 		if job.Force {
 			existing.Force = true
+		}
+		if job.ValidateHeal {
+			existing.ValidateHeal = true
 		}
 		// Priority is intentionally NOT upgraded. Re-routing across channels
 		// is non-trivial and the bg-then-user case is rare in practice.

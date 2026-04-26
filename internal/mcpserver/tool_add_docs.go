@@ -71,8 +71,10 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		return nil, nil, fmt.Errorf("checking existing repo: %w", err)
 	}
 	priorStatus := ""
+	priorDetail := ""
 	if existing != nil {
 		priorStatus = existing.Status
+		priorDetail = existing.StatusDetail
 		var existingPaths []string
 		if err := json.Unmarshal([]byte(existing.Paths), &existingPaths); err != nil {
 			existingPaths = nil
@@ -100,6 +102,7 @@ func (s *Server) handleAddGitDocs(input AddDocsInput) (*mcp.CallToolResult, any,
 		Force:       true,
 		Priority:    priorityUser,
 		PriorStatus: priorStatus,
+		PriorDetail: priorDetail,
 		RepoID:      repoID,
 	}
 
@@ -138,8 +141,10 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 		return nil, nil, fmt.Errorf("checking existing repo: %w", err)
 	}
 	priorStatus := ""
+	priorDetail := ""
 	if existing != nil {
 		priorStatus = existing.Status
+		priorDetail = existing.StatusDetail
 	}
 
 	repoID, err := s.store.UpsertRepo(input.Alias, *input.Path, "[]", "local")
@@ -155,6 +160,7 @@ func (s *Server) handleAddLocalDocs(input AddDocsInput) (*mcp.CallToolResult, an
 		Force:       true,
 		Priority:    priorityUser,
 		PriorStatus: priorStatus,
+		PriorDetail: priorDetail,
 		RepoID:      repoID,
 	}
 
