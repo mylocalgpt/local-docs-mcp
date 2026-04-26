@@ -15,11 +15,10 @@ import (
 
 func TestDecodeFileContent(t *testing.T) {
 	tests := []struct {
-		name      string
-		fixture   string // empty -> use rawData
-		rawData   []byte
-		wantErr   bool
-		skipValid bool // skip content assertions (used for error cases)
+		name    string
+		fixture string // empty -> use rawData
+		rawData []byte
+		wantErr bool
 	}{
 		{name: "empty", rawData: []byte{}, wantErr: false},
 		{name: "plain", fixture: "plain.md"},
@@ -28,10 +27,10 @@ func TestDecodeFileContent(t *testing.T) {
 		{name: "utf16le", fixture: "utf16le.md"},
 		{name: "utf16be", fixture: "utf16be.md"},
 		{name: "windows1252", fixture: "windows1252.md"},
-		{name: "utf16_truncated", fixture: "utf16_truncated.md", wantErr: true, skipValid: true},
-		{name: "utf8_bom_invalid", rawData: []byte{0xEF, 0xBB, 0xBF, 0xFF}, wantErr: true, skipValid: true},
-		{name: "embedded_nul", rawData: []byte("# Heading\nhi\x00there\n"), wantErr: true, skipValid: true},
-		{name: "bomless_utf16_looking", rawData: []byte{'#', 0x00, ' ', 0x00}, wantErr: true, skipValid: true},
+		{name: "utf16_truncated", fixture: "utf16_truncated.md", wantErr: true},
+		{name: "utf8_bom_invalid", rawData: []byte{0xEF, 0xBB, 0xBF, 0xFF}, wantErr: true},
+		{name: "embedded_nul", rawData: []byte("# Heading\nhi\x00there\n"), wantErr: true},
+		{name: "bomless_utf16_looking", rawData: []byte{'#', 0x00, ' ', 0x00}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -60,9 +59,6 @@ func TestDecodeFileContent(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.skipValid {
-				return
 			}
 			if tt.name == "empty" {
 				if got != "" {

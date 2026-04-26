@@ -180,3 +180,20 @@ func TestRepoHasInvalidEncoding_Pass2SparseWithinSample(t *testing.T) {
 		t.Errorf("expected true for invalid UTF-8 within bounded Pass-2 sample, got false")
 	}
 }
+
+func TestRepoHasInvalidEncoding_Pass2BoundedDeterministicSample(t *testing.T) {
+	s := newTestStore(t)
+	repoID := newRepoForHealth(t, s, "pass2bounded")
+	for i := 0; i < 200; i++ {
+		insertRawDoc(t, s, repoID, fmt.Sprintf("doc-%03d.md", i), "clean ascii row")
+	}
+	insertRawDoc(t, s, repoID, "outside-sample.md", "hello \xC3\x28 world")
+
+	bad, err := s.RepoHasInvalidEncoding(context.Background(), repoID)
+	if err != nil {
+		t.Fatalf("RepoHasInvalidEncoding: %v", err)
+	}
+	if bad {
+		t.Errorf("expected false for invalid UTF-8 outside deterministic Pass-2 sample, got true")
+	}
+}

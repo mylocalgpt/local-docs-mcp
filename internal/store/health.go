@@ -36,7 +36,7 @@ func (s *Store) RepoHasInvalidEncoding(ctx context.Context, repoID int64) (bool,
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT CAST(content AS BLOB) FROM documents WHERE repo_id = ? LIMIT 200`, repoID)
+		`SELECT CAST(content AS BLOB) FROM documents WHERE repo_id = ? ORDER BY id ASC LIMIT 200`, repoID)
 	if err != nil {
 		return false, fmt.Errorf("utf8-validity sample query: %w", err)
 	}
@@ -50,5 +50,8 @@ func (s *Store) RepoHasInvalidEncoding(ctx context.Context, repoID int64) (bool,
 			return true, nil
 		}
 	}
-	return false, rows.Err()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("utf8-validity sample iteration: %w", err)
+	}
+	return false, nil
 }
