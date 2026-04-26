@@ -254,8 +254,22 @@ func TestUpdateDocs_CtxCancelWhileQueued(t *testing.T) {
 		bCallDone <- err
 	}()
 
-	// Give B time to enqueue.
-	time.Sleep(100 * time.Millisecond)
+	// Wait for B to be queued server-side. The client request goroutine can be
+	// scheduled later than this test goroutine, so a fixed sleep is flaky.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if r, _ := srv.store.GetRepo("b"); r != nil && r.Status == store.StatusQueued {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if r, err := srv.store.GetRepo("b"); err != nil {
+		t.Fatalf("get b: %v", err)
+	} else if r == nil {
+		t.Fatal("b repo missing")
+	} else if r.Status != store.StatusQueued {
+		t.Fatalf("b status before cancel = %q, want %q", r.Status, store.StatusQueued)
+	}
 
 	// Cancel B's caller. This should dequeue B.
 	bCancel()
@@ -264,6 +278,24 @@ func TestUpdateDocs_CtxCancelWhileQueued(t *testing.T) {
 	case <-bCallDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("update_docs B did not return after caller ctx cancel")
+	}
+
+	// Wait for the server handler to observe cancellation, dequeue B, and revert
+	// its queued status before A is released. The MCP client may return ctx.Err
+	// before the server-side cleanup has completed.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if r, _ := srv.store.GetRepo("b"); r != nil && r.Status == store.StatusReady {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if r, err := srv.store.GetRepo("b"); err != nil {
+		t.Fatalf("get b: %v", err)
+	} else if r == nil {
+		t.Fatal("b repo missing")
+	} else if r.Status != store.StatusReady {
+		t.Fatalf("b status after cancel-while-queued = %q, want %q", r.Status, store.StatusReady)
 	}
 
 	// Now release A so the worker drains.
@@ -289,15 +321,6 @@ func TestUpdateDocs_CtxCancelWhileQueued(t *testing.T) {
 	// Regression: cancelling while queued must also revert b's DB status
 	// (it was promoted to StatusQueued by enqueue). Without the revert b
 	// would strand at "queued" and autoRefresh would skip it forever.
-	// The server-side revert may land after the SDK returns ctx.Err to
-	// the caller, so poll briefly.
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if r, _ := srv.store.GetRepo("b"); r != nil && r.Status != store.StatusQueued {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 	if r, err := srv.store.GetRepo("b"); err != nil {
 		t.Fatalf("get b: %v", err)
 	} else if r == nil {
