@@ -142,7 +142,7 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 	}
 }
 
-func TestSparseCheckoutStripsLeadingSlash(t *testing.T) {
+func TestSparseCheckoutWithLeadingSlash(t *testing.T) {
 	origin := initTestRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone-leading-slash")
 
@@ -163,7 +163,7 @@ func TestSparseCheckoutStripsLeadingSlash(t *testing.T) {
 	}
 }
 
-func TestSparseCheckoutLeadingSlashRootChecksOutFullRepo(t *testing.T) {
+func TestSparseCheckoutRootPathFullCheckout(t *testing.T) {
 	origin := initTestRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone-root")
 
