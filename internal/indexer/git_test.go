@@ -142,6 +142,48 @@ func TestCloneNoCheckoutThenSparseCheckout(t *testing.T) {
 	}
 }
 
+func TestSparseCheckoutStripsLeadingSlash(t *testing.T) {
+	origin := initTestRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone-leading-slash")
+
+	if err := CloneNoCheckout(context.Background(), origin, dest); err != nil {
+		t.Fatalf("CloneNoCheckout: %v", err)
+	}
+
+	if err := SparseCheckoutAndCheckout(context.Background(), dest, []string{"/docs"}); err != nil {
+		t.Fatalf("SparseCheckoutAndCheckout: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "docs", "guide.md")); err != nil {
+		t.Errorf("expected docs/guide.md after checkout: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "src", "main.go")); !os.IsNotExist(err) {
+		t.Errorf("expected src/main.go to be absent, got err: %v", err)
+	}
+}
+
+func TestSparseCheckoutLeadingSlashRootChecksOutFullRepo(t *testing.T) {
+	origin := initTestRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone-root")
+
+	if err := CloneNoCheckout(context.Background(), origin, dest); err != nil {
+		t.Fatalf("CloneNoCheckout: %v", err)
+	}
+
+	if err := SparseCheckoutAndCheckout(context.Background(), dest, []string{"/"}); err != nil {
+		t.Fatalf("SparseCheckoutAndCheckout: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "docs", "guide.md")); err != nil {
+		t.Errorf("expected docs/guide.md after checkout: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "src", "main.go")); err != nil {
+		t.Errorf("expected src/main.go after checkout: %v", err)
+	}
+}
+
 func TestInvalidRepoURL(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "bad-clone")
 	err := CloneDocFolders(context.Background(), "https://invalid.example.com/no-such-repo.git", dest, []string{"docs"})
