@@ -72,15 +72,32 @@ func CloneNoCheckout(ctx context.Context, repoURL, destDir string) error {
 // SparseCheckoutAndCheckout sets the sparse-checkout paths and then checks out
 // the working tree. Call this after CloneNoCheckout.
 func SparseCheckoutAndCheckout(ctx context.Context, repoDir string, paths []string) error {
-	args := append([]string{"-C", repoDir, "sparse-checkout", "set"}, paths...)
-	if _, err := runGit(ctx, args...); err != nil {
-		return fmt.Errorf("sparse-checkout: %w", err)
+	sparsePaths, fullCheckout := normalizeSparseCheckoutPaths(paths)
+	if !fullCheckout {
+		args := append([]string{"-C", repoDir, "sparse-checkout", "set"}, sparsePaths...)
+		if _, err := runGit(ctx, args...); err != nil {
+			return fmt.Errorf("sparse-checkout: %w", err)
+		}
 	}
 
 	if _, err := runGit(ctx, "-C", repoDir, "checkout"); err != nil {
 		return fmt.Errorf("checkout: %w", err)
 	}
 	return nil
+}
+
+// normalizeSparseCheckoutPaths removes all leading slashes from sparse-checkout
+// paths. It returns fullCheckout when a root path such as "/" is requested.
+func normalizeSparseCheckoutPaths(paths []string) ([]string, bool) {
+	normalized := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimLeft(p, "/")
+		if p == "" {
+			return nil, true
+		}
+		normalized = append(normalized, p)
+	}
+	return normalized, false
 }
 
 // CloneDocFolders clones a repo and checks out only the specified paths.
