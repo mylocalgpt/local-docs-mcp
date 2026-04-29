@@ -86,6 +86,8 @@ func SparseCheckoutAndCheckout(ctx context.Context, repoDir string, paths []stri
 	return nil
 }
 
+// normalizeSparseCheckoutPaths removes all leading slashes from sparse-checkout
+// paths. It returns fullCheckout when a root path such as "/" is requested.
 func normalizeSparseCheckoutPaths(paths []string) ([]string, bool) {
 	normalized := make([]string, 0, len(paths))
 	for _, p := range paths {
